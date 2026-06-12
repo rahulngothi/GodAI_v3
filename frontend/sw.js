@@ -1,5 +1,5 @@
 // Dharma AI service worker — network-first so updates always show; cache is offline fallback only.
-const CACHE = "dharma-ai-v5";
+const CACHE = "dharma-ai-v6";
 const SHELL = [
   "/",
   "/index.html",

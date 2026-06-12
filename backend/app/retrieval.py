@@ -62,6 +62,7 @@ def search(question: str, k: int = 5, sources: list[str] | None = None) -> list[
                 "transliteration": d.get("transliteration"),
                 "translation": d["translation"],
                 "translator": d["translator"],
+                "layer": d.get("layer", "scripture"),
                 "score": round(float(sims[int(i)]), 4),
             }
         )

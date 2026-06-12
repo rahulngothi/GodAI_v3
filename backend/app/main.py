@@ -24,6 +24,8 @@ from .personas import PERSONAS
 from .schemas import (
     AskRequest,
     AskResponse,
+    ChatFull,
+    ChatSummary,
     DailyResponse,
     JournalEntry,
     JournalSaveRequest,
@@ -86,11 +88,48 @@ def me(user: str = Depends(get_current_user)):
     return {"username": user}
 
 
+def _save_turns(user: str, chat_id: str | None, req: AskRequest, result: dict) -> str:
+    """Persist this exchange into the user's chat document; returns the chat id."""
+    chats = get_db()["chats"]
+    now = _dt.datetime.now(_dt.timezone.utc)
+    assistant_turn = {
+        "role": "assistant",
+        "answer": result["answer"],
+        "citations": result["citations"],
+        "followups": result["followups"],
+        "persona": result["persona"],
+        "persona_name": result["persona_name"],
+    }
+    user_turn = {"role": "user", "content": req.question}
+    if chat_id:
+        try:
+            oid = ObjectId(chat_id)
+            r = chats.update_one(
+                {"_id": oid, "user": user},
+                {"$push": {"turns": {"$each": [user_turn, assistant_turn]}},
+                 "$set": {"updated_at": now}},
+            )
+            if r.matched_count:
+                return chat_id
+        except Exception:
+            pass
+    doc = {
+        "user": user,
+        "title": req.question[:80],
+        "persona": req.persona,
+        "language": req.language,
+        "turns": [user_turn, assistant_turn],
+        "created_at": now,
+        "updated_at": now,
+    }
+    return str(chats.insert_one(doc).inserted_id)
+
+
 @app.post("/api/ask", response_model=AskResponse)
 def ask_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
     ratelimit.check(user)
     try:
-        return ask_module.ask(
+        result = ask_module.ask(
             req.question,
             persona_key=req.persona,
             language=req.language,
@@ -98,6 +137,42 @@ def ask_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+    result["chat_id"] = _save_turns(user, req.chat_id, req, result)
+    return result
+
+
+# ---- saved chats ----
+@app.get("/api/chats", response_model=list[ChatSummary])
+def chats_list(user: str = Depends(get_current_user)):
+    docs = get_db()["chats"].find({"user": user}).sort("updated_at", -1).limit(50)
+    return [
+        {"id": str(d["_id"]), "title": d.get("title", ""), "persona": d.get("persona", "guide"),
+         "language": d.get("language", "english"), "updated": d["updated_at"].strftime("%Y-%m-%d %H:%M")}
+        for d in docs
+    ]
+
+
+@app.get("/api/chats/{chat_id}", response_model=ChatFull)
+def chats_get(chat_id: str, user: str = Depends(get_current_user)):
+    try:
+        oid = ObjectId(chat_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Bad chat id")
+    d = get_db()["chats"].find_one({"_id": oid, "user": user})
+    if not d:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {"id": str(d["_id"]), "title": d.get("title", ""), "persona": d.get("persona", "guide"),
+            "language": d.get("language", "english"), "turns": d.get("turns", [])}
+
+
+@app.delete("/api/chats/{chat_id}")
+def chats_delete(chat_id: str, user: str = Depends(get_current_user)):
+    try:
+        oid = ObjectId(chat_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Bad chat id")
+    res = get_db()["chats"].delete_one({"_id": oid, "user": user})
+    return {"deleted": res.deleted_count == 1}
 
 
 @app.post("/api/perspectives", response_model=PerspectivesResponse)

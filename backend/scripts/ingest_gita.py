@@ -67,6 +67,7 @@ def build_gita_docs() -> list[dict]:
             "transliteration": (v.get("transliteration") or "").strip(),
             "translation": tr,
             "translator": GITA_TRANSLATOR,
+            "layer": "scripture",
         })
     return docs
 
@@ -78,16 +79,21 @@ def build_corpus_docs() -> list[dict]:
     for path in sorted(CORPUS.glob("*.json")):
         items = json.loads(path.read_text(encoding="utf-8"))
         for i, it in enumerate(items):
+            source = it["source"]
+            # Trust & Safety 3-way labeling: scripture vs teacher's words (AI
+            # interpretation is the model's reply itself, labeled in the UI).
+            layer = it.get("layer") or ("teacher" if source.startswith("Vivekananda") else "scripture")
             docs.append({
-                "_id": f"{it['source']}-{i}",
+                "_id": f"{path.stem}-{i}",
                 "ref": it["ref"],
-                "source": it["source"],
+                "source": source,
                 "chapter": it.get("chapter"),
                 "verse": it.get("verse"),
                 "sanskrit": it.get("sanskrit", ""),
                 "transliteration": it.get("transliteration", ""),
                 "translation": it["translation"],
                 "translator": it["translator"],
+                "layer": layer,
             })
     return docs
 

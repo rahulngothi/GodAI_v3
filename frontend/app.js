@@ -5,6 +5,7 @@ let currentLanguage = "english";
 let currentMode = "converse"; // converse | perspectives | daily
 let currentUser = "";
 let history = [];
+let chatId = null;   // saved-conversation id (server-side)
 const LANG_BCP = { english: "en-IN" };
 
 const chat = document.getElementById("chat");
@@ -121,6 +122,7 @@ function welcomeHTML() {
 
 function clearChat() {
   history = [];
+  chatId = null;
   stopSpeaking();
   if (currentMode === "converse") {
     chat.innerHTML = welcomeHTML();
@@ -154,6 +156,68 @@ document.getElementById("modebar").addEventListener("click", (e) => {
   if (tab) setMode(tab.dataset.mode);
 });
 document.getElementById("clearBtn").addEventListener("click", () => { clearChat(); if (currentMode === "daily") loadDaily(); });
+
+// ================= saved conversations =================
+async function openHistory() {
+  if (!token) { showLogin(true); return; }
+  if (currentMode !== "converse") setMode("converse");
+  stopSpeaking();
+  chat.innerHTML = `<div class="hist-h">Past conversations</div><div class="hist-sub">tap one to continue where you left off</div>`;
+  try {
+    const chats = await apiFetch("/api/chats");
+    if (!chats.length) {
+      chat.innerHTML += `<div class="hist-sub" style="margin-top:20px">No conversations yet — ask your first question. 🙏</div>`;
+      return;
+    }
+    chats.forEach((c) => {
+      const item = document.createElement("div");
+      item.className = "chat-item";
+      item.innerHTML = `${faceHTML(c.persona)}<div class="chat-item-body">
+          <div class="chat-item-title">${escapeHtml(c.title)}</div>
+          <div class="chat-item-meta">${escapeHtml(personaName(c.persona))} · ${escapeHtml(c.updated)}</div>
+        </div><button class="chat-item-del" title="Delete">🗑</button>`;
+      item.querySelector(".chat-item-del").onclick = async (e) => {
+        e.stopPropagation();
+        await apiFetch(`/api/chats/${c.id}`, { method: "DELETE" });
+        item.remove();
+      };
+      item.onclick = () => loadChat(c.id);
+      chat.appendChild(item);
+    });
+  } catch (e) {
+    chat.innerHTML += `<div class="hist-sub">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+async function loadChat(id) {
+  try {
+    const c = await apiFetch(`/api/chats/${id}`);
+    chatId = c.id;
+    currentPersona = c.persona || "guide";
+    currentLanguage = c.language || currentLanguage;
+    languageSel.value = currentLanguage;
+    document.querySelectorAll(".story").forEach((x) => x.classList.toggle("active", x.dataset.key === currentPersona));
+    history = [];
+    chat.innerHTML = "";
+    (c.turns || []).forEach((t) => {
+      if (t.role === "user") {
+        addUser(t.content || "");
+        history.push({ role: "user", content: t.content || "" });
+      } else {
+        const wrap = document.createElement("div");
+        wrap.className = "msg ai";
+        chat.appendChild(wrap);
+        renderResponse(wrap, t);
+        history.push({ role: "assistant", content: t.answer || "" });
+      }
+    });
+    scrollDown();
+  } catch (e) {
+    chat.innerHTML = `<div class="hist-sub">${escapeHtml(e.message)}</div>`;
+  }
+}
+
+document.getElementById("histBtn").addEventListener("click", openHistory);
 
 // ================= personas =================
 async function loadPersonas() {
@@ -210,13 +274,19 @@ function renderAnswer(text) {
 }
 
 function versesHtml(sources) {
-  return sources.map((v) => `
+  return sources.map((v) => {
+    const teacher = v.layer === "teacher";
+    const badge = teacher
+      ? `<span class="layer-badge teacher">Teacher's words</span>`
+      : `<span class="layer-badge scripture">Scripture</span>`;
+    return `
     <div class="verse" id="src-${v.ref.replace(/[^\w]/g, "")}">
-      <div class="verse-ref">${escapeHtml(v.ref)}</div>
+      <div class="verse-ref">${escapeHtml(v.ref)} ${badge}</div>
       <div class="verse-trans">“${escapeHtml(v.translation)}”</div>
       ${v.transliteration ? `<div class="verse-sanskrit">${escapeHtml(v.transliteration)}</div>` : ""}
-      <div class="verse-meta">Trans. ${escapeHtml(v.translator)} · ${escapeHtml(v.source || "Bhagavad Gita")}</div>
-    </div>`).join("");
+      <div class="verse-meta">${teacher ? "" : "Trans. "}${escapeHtml(v.translator)} · ${escapeHtml(v.source || "Bhagavad Gita")}</div>
+    </div>`;
+  }).join("");
 }
 
 function wireCitations(wrap) {
@@ -267,6 +337,7 @@ function renderResponse(wrap, data) {
       </div>
       <div class="answer-text">${renderAnswer(data.answer || "")}</div>
       ${sourcesBlock(data.citations || [])}
+      <div class="ai-note">🪷 ${escapeHtml(data.persona_name || "This guide")}'s reply is an <b>AI interpretation</b>, grounded in the labeled sources above — scripture and teachers' words are quoted exactly as translated.</div>
       ${followHtml ? `<div class="followups">${followHtml}</div>` : ""}
       <div class="actions"><button class="mini-btn listen">🔊 Listen</button></div>
     </div>`;
@@ -296,6 +367,7 @@ function renderPerspectives(wrap, data) {
       <div class="perspectives-sub">Five traditions answer, each from its own scripture</div>
       ${views}
       ${sourcesBlock(data.citations || [])}
+      <div class="ai-note">🪷 Each view is an <b>AI interpretation</b> in that tradition's voice, grounded only in its own labeled sources above.</div>
       <div class="actions"><button class="mini-btn listen">🔊 Listen all</button></div>
     </div>`;
   wireCitations(wrap);
@@ -319,7 +391,7 @@ function renderDaily(data) {
       <div class="daily-eyebrow">${escapeHtml(data.period)} · ${escapeHtml(data.date)}</div>
       <div class="daily-verse">“${escapeHtml(data.verse.translation)}”</div>
       <a class="cite" data-ref="${escapeHtml(data.verse.ref)}">${escapeHtml(data.verse.ref)}</a>
-      <div class="daily-block"><div class="daily-h">Reflection</div><p>${escapeHtml(data.reflection)}</p></div>
+      <div class="daily-block"><div class="daily-h">Reflection <span class="layer-badge teacher" style="vertical-align:middle">AI interpretation</span></div><p>${escapeHtml(data.reflection)}</p></div>
       <div class="daily-block"><div class="daily-h">${data.period === "morning" ? "Today's practice" : "Evening practice"}</div><p>${escapeHtml(data.practice)}</p></div>
       <div class="daily-journal">✍️ ${escapeHtml(data.journal_prompt)}</div>
       <div class="journal-box">
@@ -356,7 +428,7 @@ async function send(question) {
     const url = perspectivesMode ? `/api/perspectives` : `/api/ask`;
     const body = perspectivesMode
       ? { question, language: currentLanguage }
-      : { question, persona: currentPersona, language: currentLanguage, history: history.slice(-6) };
+      : { question, persona: currentPersona, language: currentLanguage, history: history.slice(-6), chat_id: chatId };
     const data = await apiFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -366,6 +438,7 @@ async function send(question) {
       renderPerspectives(wrap, data);
     } else {
       renderResponse(wrap, data);
+      if (data.chat_id) chatId = data.chat_id;
       history.push({ role: "user", content: question });
       history.push({ role: "assistant", content: data.answer || "" });
     }
@@ -540,9 +613,10 @@ async function convoAsk(question) {
     const data = await apiFetch("/api/ask", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, persona: currentPersona, language: currentLanguage, history: history.slice(-6) }),
+      body: JSON.stringify({ question, persona: currentPersona, language: currentLanguage, history: history.slice(-6), chat_id: chatId }),
     });
     renderResponse(wrap, data);
+    if (data.chat_id) chatId = data.chat_id;
     history.push({ role: "user", content: question });
     history.push({ role: "assistant", content: data.answer || "" });
     // conversational view: just the words, no sources

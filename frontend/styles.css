@@ -168,7 +168,34 @@ body { font-family: var(--sans); color: var(--ink); background: var(--night); ov
   border-radius: 11px; padding: 10px 12px; margin-bottom: 8px; transition: box-shadow .25s, transform .25s;
 }
 .verse.flash { box-shadow: 0 0 0 3px var(--gold-soft); transform: scale(1.01); }
-.verse-ref { font-weight: 700; color: var(--saffron-deep); font-size: 12.5px; }
+.verse-ref { font-weight: 700; color: var(--saffron-deep); font-size: 12.5px; display: flex; align-items: center; gap: 7px; }
+.layer-badge {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .6px; text-transform: uppercase;
+  padding: 2px 7px; border-radius: 999px; line-height: 1.4;
+}
+.layer-badge.scripture { background: #f3e3bb; color: #7a5410; }
+.layer-badge.teacher { background: #dcebe2; color: #2e5e42; }
+.ai-note {
+  margin-top: 12px; font-size: 11.5px; color: var(--ink-soft); line-height: 1.5;
+  border-top: 1px dashed var(--line); padding-top: 9px;
+}
+
+/* chat history list */
+.hist-h { font-family: var(--serif); font-size: 20px; color: #fff; text-align: center; margin: 8px 0 2px; }
+.hist-sub { font-size: 12.5px; color: var(--gold-soft); text-align: center; margin-bottom: 10px; }
+.chat-item {
+  display: flex; align-items: center; gap: 11px; cursor: pointer;
+  background: linear-gradient(180deg, var(--parchment), var(--cream));
+  border: 1px solid var(--line); border-radius: 15px; padding: 11px 13px;
+  box-shadow: var(--card-shadow); transition: transform .12s;
+}
+.chat-item:active { transform: scale(.985); }
+.chat-item .avatar { width: 38px; height: 38px; }
+.chat-item-body { flex: 1; min-width: 0; }
+.chat-item-title { font-size: 14px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-item-meta { font-size: 11px; color: var(--ink-soft); margin-top: 2px; }
+.chat-item-del { border: none; background: none; cursor: pointer; font-size: 15px; opacity: .5; padding: 6px; }
+.chat-item-del:hover { opacity: 1; }
 .verse-trans { font-size: 14px; line-height: 1.55; margin: 4px 0; color: #3a2d20; font-style: italic; }
 .verse-sanskrit { font-size: 13px; color: var(--ink-soft); margin: 3px 0 2px; }
 .verse-meta { font-size: 10px; color: var(--ink-soft); opacity: .85; }

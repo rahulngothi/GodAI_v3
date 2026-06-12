@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 
 
 class Citation(BaseModel):
-    ref: str                        # e.g. "BG 2.47" or "Dhammapada 5"
+    ref: str                        # e.g. "BG 2.47" or "Katha Upanishad 1.2.20"
     source: str = "Bhagavad Gita"
     chapter: int | None = None
     verse: int | None = None
@@ -13,6 +13,7 @@ class Citation(BaseModel):
     transliteration: str | None = None
     translation: str
     translator: str
+    layer: str = "scripture"        # "scripture" | "teacher" (AI interpretation = the reply itself)
     used: bool = True
 
 
@@ -27,6 +28,7 @@ class AskRequest(BaseModel):
     persona: str = "guide"
     language: str = "english"
     history: list[Turn] = []
+    chat_id: str | None = None      # continue a saved conversation
 
 
 class AskResponse(BaseModel):
@@ -35,6 +37,24 @@ class AskResponse(BaseModel):
     followups: list[str]
     persona: str
     persona_name: str
+    chat_id: str | None = None
+
+
+# ---- saved chats ----
+class ChatSummary(BaseModel):
+    id: str
+    title: str
+    persona: str
+    language: str
+    updated: str
+
+
+class ChatFull(BaseModel):
+    id: str
+    title: str
+    persona: str
+    language: str
+    turns: list[dict]               # [{role:"user",content} | {role:"assistant", ...AskResponse}]
 
 
 # ---- Multi-Perspective Wisdom ----
