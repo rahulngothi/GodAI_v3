@@ -79,11 +79,18 @@
   FACES.guide = glyph("gu", "ॐ", "#e8a93a", "#b8410e");
   FACES.modern = glyph("mo", "✦", "#5c7cfa", "#33409c", 44);
 
-  // Each render gets UNIQUE gradient ids. Shared ids break badly: when the first
+  // Realistic public-domain portraits (Wikimedia Commons, license-checked) for the
+  // historical guides; glyph medallions for the abstract ones (guide, modern).
+  const PHOTOS = ["krishna", "buddha", "vivekananda", "chanakya", "ramana", "shankara"];
+
+  // Each SVG render gets UNIQUE gradient ids. Shared ids break badly: when the first
   // occurrence sits in a hidden container (the login overlay), url(#...) lookups
   // fail and every face renders black.
   let uid = 0;
   window.faceHTML = function (key, cls = "") {
+    if (PHOTOS.includes(key)) {
+      return `<div class="avatar photo ${cls}" data-face="${key}"><img src="/icons/face-${key}.jpg" alt="" loading="lazy"/></div>`;
+    }
     const raw = FACES[key] || FACES.guide;
     const u = ++uid;
     const svg = raw.replace(/bg-[a-z]{2}/g, (m) => `${m}-${u}`);

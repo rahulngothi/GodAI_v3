@@ -72,12 +72,35 @@ def perspectives(question: str, language: str = "english", per_tradition_k: int 
         blocks.append(f'{t["name"].upper()} — speaks from {src_label}; lens: {t["lens"]}\nPASSAGES (use ONLY these):\n{ctx}')
 
     system = _SYSTEM.format(n=len(TRADITIONS), blocks="\n\n".join(blocks), language=lang_name(language))
-    raw = chat(
-        [{"role": "system", "content": system}, {"role": "user", "content": f"QUESTION: {question}"}],
-        temperature=0.45, max_tokens=2600,
-    )
-    parsed = _extract_json(raw) or {}
-    by_key = {p.get("key"): p for p in parsed.get("perspectives", []) if isinstance(p, dict)}
+
+    # The model occasionally mislabels keys ("Krishna", "adi_shankaracharya"…) or
+    # returns malformed JSON. Normalize keys, fall back to answer ORDER, retry once.
+    def _ask_model() -> list[dict]:
+        raw = chat(
+            [{"role": "system", "content": system}, {"role": "user", "content": f"QUESTION: {question}"}],
+            temperature=0.45, max_tokens=2600,
+        )
+        parsed = _extract_json(raw) or {}
+        items = [p for p in parsed.get("perspectives", []) if isinstance(p, dict)]
+        return items
+
+    items = _ask_model()
+    if not items:
+        items = _ask_model()  # one retry
+
+    def _norm(s: str) -> str:
+        return "".join(ch for ch in (s or "").lower() if ch.isalnum())
+
+    by_key: dict[str, dict] = {}
+    for p in items:
+        k = _norm(p.get("key", ""))
+        for t in TRADITIONS:
+            if k and (k == t["key"] or t["key"] in k or k in _norm(t["name"])):
+                by_key.setdefault(t["key"], p)
+                break
+    # Order-based fallback: if matching failed but we have the right count, zip in order.
+    if len(by_key) < len(items) == len(TRADITIONS):
+        by_key = {t["key"]: p for t, p in zip(TRADITIONS, items)}
 
     out_perspectives = []
     citations = []

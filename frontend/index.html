@@ -31,14 +31,28 @@
     </form>
   </div>
 
-  <!-- Speaking view -->
+  <!-- Speaking view (listen button) -->
   <div id="speakOverlay" class="speak-overlay" hidden>
-    <div class="speak-stage talking">
+    <div class="speak-stage" id="speakStage">
       <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div>
       <div class="speak-face" id="speakFace"></div>
     </div>
     <div class="speak-name" id="speakName"></div>
+    <div class="eq"><span></span><span></span><span></span><span></span><span></span></div>
     <div class="speak-hint">tap anywhere to stop</div>
+  </div>
+
+  <!-- Conversation mode (talk with the guide) -->
+  <div id="convoOverlay" class="convo-overlay" hidden>
+    <button class="convo-close" id="convoClose" aria-label="Close">✕</button>
+    <div class="speak-stage" id="convoStage">
+      <div class="ring"></div><div class="ring r2"></div><div class="ring r3"></div>
+      <div class="speak-face" id="convoFace"></div>
+    </div>
+    <div class="speak-name" id="convoName"></div>
+    <div class="convo-status" id="convoStatus">tap the mic and speak</div>
+    <div class="convo-text" id="convoText"></div>
+    <button type="button" class="round-btn convo-mic" id="convoMic">🎙️</button>
   </div>
 
   <div id="app">

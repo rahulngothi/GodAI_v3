@@ -108,8 +108,9 @@ function welcomeHTML() {
   <div class="welcome" id="welcome">
     ${faceHTML(currentPersona)}
     <h2>${greeting()}${escapeHtml(who)} 🙏</h2>
-    <p>You are sitting with <b>${escapeHtml(personaName(currentPersona))}</b>.<br/>Speak or type what weighs on your heart — every answer carries its true verse.</p>
+    <p>You are sitting with <b>${escapeHtml(personaName(currentPersona))}</b>.<br/>Tap their face to talk, or type below — every answer carries its true verse.</p>
     <div class="samples" id="samples">
+      <button class="sample talk-chip" style="background:linear-gradient(135deg,#e8b04b,#f0962e);color:#2a1800;font-weight:700;border-color:transparent">🎙️ Talk with ${escapeHtml(personaName(currentPersona))}</button>
       <button class="sample">I feel stuck in life</button>
       <button class="sample">How do I find peace?</button>
       <button class="sample">Why do I overthink?</button>
@@ -276,11 +277,16 @@ function renderResponse(wrap, data) {
 }
 
 function renderPerspectives(wrap, data) {
-  const views = (data.perspectives || []).map((p) => `
+  const perspectives = data.perspectives || [];
+  if (!perspectives.length) {
+    wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">🙏 The council fell silent for a moment — please ask once more.</div></div>`;
+    return;
+  }
+  const views = perspectives.map((p, i) => `
     <div class="pview">
       ${faceHTML(p.key)}
       <div class="pview-body">
-        <div class="pview-name">${escapeHtml(p.tradition)}</div>
+        <div class="pview-name">${escapeHtml(p.tradition)} <button class="pview-listen" data-i="${i}" title="Listen">🔊</button></div>
         <div class="pview-text">${renderAnswer(p.view)}</div>
       </div>
     </div>`).join("");
@@ -293,7 +299,13 @@ function renderPerspectives(wrap, data) {
       <div class="actions"><button class="mini-btn listen">🔊 Listen all</button></div>
     </div>`;
   wireCitations(wrap);
-  const spoken = (data.perspectives || []).map((p) => `${p.tradition}. ${p.view}`).join(" ");
+  wrap.querySelectorAll(".pview-listen").forEach((b) => {
+    b.onclick = () => {
+      const p = perspectives[parseInt(b.dataset.i, 10)];
+      speak(p.view, null, p.key);
+    };
+  });
+  const spoken = perspectives.map((p) => `${p.tradition}. ${p.view}`).join(" ");
   wrap.querySelector(".listen").onclick = (e) => speak(spoken, e.currentTarget, "guide");
   scrollDown();
 }
@@ -365,7 +377,10 @@ async function send(question) {
 composer.addEventListener("submit", (e) => { e.preventDefault(); send(); });
 input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
 input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 130) + "px"; });
-chat.addEventListener("click", (e) => { const s = e.target.closest(".sample"); if (s) send(s.textContent); });
+chat.addEventListener("click", (e) => {
+  const s = e.target.closest(".sample");
+  if (s && !s.classList.contains("talk-chip")) send(s.textContent);
+});
 
 // ================= daily / journal =================
 async function loadDaily() {
@@ -426,9 +441,46 @@ if (SR) {
 
 // ================= voice: talking avatar (TTS) =================
 let speakingBtn = null;
+let activeStage = null;
+
+// Prefer deep male Indian voices, then "natural/neural" voices; lower pitch so it
+// never sounds childlike.
+function pickVoice(lang) {
+  const voices = window.speechSynthesis.getVoices();
+  const pref = /(ravi|hemant|prabhat|madhur|valluvar|male)/i;
+  const natural = /(natural|neural|online)/i;
+  return (
+    voices.find((v) => v.lang === lang && pref.test(v.name)) ||
+    voices.find((v) => v.lang.startsWith(lang.slice(0, 2)) && pref.test(v.name)) ||
+    voices.find((v) => v.lang === lang && natural.test(v.name)) ||
+    voices.find((v) => v.lang === lang) ||
+    voices.find((v) => v.lang.startsWith(lang.slice(0, 2)))
+  );
+}
+
+function cleanForSpeech(text) {
+  return text.replace(/\[[^\]]*\d[^\]]*\]/g, "").replace(/\s{2,}/g, " ").trim();
+}
+
+function speakRaw(text, stageEl, onend) {
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = bcp47();
+  const v = pickVoice(u.lang);
+  if (v) u.voice = v;
+  u.rate = 0.95;
+  u.pitch = 0.82; // deeper, calmer — no baby voice
+  activeStage = stageEl;
+  stageEl.classList.add("talking");
+  const done = () => { stageEl.classList.remove("talking"); activeStage = null; if (onend) onend(); };
+  u.onend = done;
+  u.onerror = done;
+  window.speechSynthesis.speak(u);
+}
 
 function stopSpeaking() {
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  if (activeStage) { activeStage.classList.remove("talking"); activeStage = null; }
   speakOverlay.hidden = true;
   if (speakingBtn) { speakingBtn.classList.remove("speaking"); speakingBtn.textContent = "🔊 Listen"; speakingBtn = null; }
 }
@@ -436,31 +488,105 @@ function stopSpeaking() {
 function speak(text, btn, personaKey) {
   if (!("speechSynthesis" in window)) return;
   if (speakingBtn) { stopSpeaking(); return; }
-  const clean = text.replace(/\[[^\]]*\d[^\]]*\]/g, "").replace(/\s{2,}/g, " ").trim();
+  const clean = cleanForSpeech(text);
   if (!clean) return;
 
-  // open the talking-avatar view
   document.getElementById("speakFace").innerHTML = faceHTML(personaKey);
   document.getElementById("speakName").textContent = personaKey === "guide" ? "Dharma Guide" : personaName(personaKey);
   speakOverlay.hidden = false;
 
-  const u = new SpeechSynthesisUtterance(clean);
-  u.lang = bcp47();
-  const voices = window.speechSynthesis.getVoices();
-  const v = voices.find((x) => x.lang === u.lang) || voices.find((x) => x.lang.startsWith(u.lang.slice(0, 2)));
-  if (v) u.voice = v;
-  u.rate = 0.97;
-  u.onend = stopSpeaking;
-  u.onerror = stopSpeaking;
-
   speakingBtn = btn;
-  btn.classList.add("speaking");
-  btn.textContent = "⏹ Stop";
-  window.speechSynthesis.speak(u);
+  if (btn) { btn.classList.add("speaking"); btn.textContent = "⏹ Stop"; }
+  speakRaw(clean, document.getElementById("speakStage"), () => { stopSpeaking(); });
 }
 
 speakOverlay.addEventListener("click", stopSpeaking);
 if ("speechSynthesis" in window) window.speechSynthesis.onvoiceschanged = () => {};
+
+// ================= conversation mode =================
+const convoOverlay = document.getElementById("convoOverlay");
+const convoStage = document.getElementById("convoStage");
+const convoText = document.getElementById("convoText");
+const convoStatus = document.getElementById("convoStatus");
+const convoMic = document.getElementById("convoMic");
+let convoBusy = false;
+
+function openConvo() {
+  if (!token) { showLogin(true); return; }
+  document.getElementById("convoFace").innerHTML = faceHTML(currentPersona);
+  document.getElementById("convoName").textContent = personaName(currentPersona);
+  convoText.textContent = "";
+  convoStatus.textContent = "tap the mic and speak";
+  convoOverlay.hidden = false;
+}
+
+function closeConvo() {
+  stopSpeaking();
+  convoStage.classList.remove("talking");
+  convoOverlay.classList.remove("talking");
+  convoOverlay.hidden = true;
+}
+document.getElementById("convoClose").addEventListener("click", closeConvo);
+
+async function convoAsk(question) {
+  if (convoBusy) return;
+  convoBusy = true;
+  convoStatus.textContent = "listening to your heart…";
+  convoText.textContent = "“" + question + "”";
+  // mirror into the chat behind, so text mode keeps the full record (with sources)
+  addUser(question);
+  const wrap = addTyping();
+  try {
+    const data = await apiFetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, persona: currentPersona, language: currentLanguage, history: history.slice(-6) }),
+    });
+    renderResponse(wrap, data);
+    history.push({ role: "user", content: question });
+    history.push({ role: "assistant", content: data.answer || "" });
+    // conversational view: just the words, no sources
+    const spoken = cleanForSpeech(data.answer || "");
+    convoText.textContent = spoken;
+    convoStatus.textContent = personaName(currentPersona) + " is speaking…";
+    convoOverlay.classList.add("talking");
+    speakRaw(spoken, convoStage, () => {
+      convoOverlay.classList.remove("talking");
+      convoStatus.textContent = "tap the mic to reply";
+    });
+  } catch (e) {
+    wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">🙏 ${escapeHtml(e.message)}</div></div>`;
+    convoStatus.textContent = e.message;
+  } finally {
+    convoBusy = false;
+  }
+}
+
+// dedicated recognizer for conversation mode
+if (SR) {
+  const crec = new SR();
+  crec.interimResults = false;
+  let clistening = false;
+  convoMic.onclick = () => {
+    if (clistening) { crec.stop(); return; }
+    stopSpeaking();
+    convoOverlay.classList.remove("talking");
+    crec.lang = bcp47();
+    try { crec.start(); } catch (e) {}
+  };
+  crec.onstart = () => { clistening = true; convoMic.classList.add("listening"); convoStatus.textContent = "listening…"; };
+  crec.onend = () => { clistening = false; convoMic.classList.remove("listening"); };
+  crec.onresult = (ev) => convoAsk(ev.results[0][0].transcript);
+  crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn't catch that — tap the mic again"; };
+} else {
+  convoMic.style.opacity = 0.4;
+  convoStatus.textContent = "voice needs Chrome/Safari over HTTPS";
+}
+
+// open conversation mode by tapping the big welcome avatar or the talk chip
+chat.addEventListener("click", (e) => {
+  if (e.target.closest(".talk-chip") || e.target.closest("#welcome .avatar")) openConvo();
+});
 
 // ================= PWA =================
 let deferredPrompt = null;

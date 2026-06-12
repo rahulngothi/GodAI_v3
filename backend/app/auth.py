@@ -18,7 +18,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from .config import settings
 
 # Temporary hardcoded users (per product decision 2026-06-12).
-USERS: dict[str, str] = {"test1": "test", "test2": "test", "test3": "test"}
+USERS: dict[str, str] = {"rahul": "rahul", "rishabh": "rishabh", "sid": "sid"}
 
 TOKEN_TTL = 7 * 24 * 3600  # 7 days
 
