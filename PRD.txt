@@ -1,0 +1,396 @@
+PRD: Dharma AI
+
+AI-Powered Spiritual Companion for Bharat
+
+Version: 1.0
+
+Owner: Founding Team
+
+Date: June 2026
+
+⸻
+
+1. Vision
+
+Build the world’s most trusted AI-powered spiritual companion that enables users to interact with the wisdom of scriptures, saints, philosophers, and spiritual traditions through natural conversation, voice, and personalized guidance in their native language.
+
+The platform will allow users to:
+
+* Ask life questions rooted in spirituality and philosophy
+* Understand scripture in simple language
+* Receive daily guidance and reflection
+* Interact with AI-powered spiritual personas
+* Learn and explore faith traditions through conversation
+
+Dharma AI aims to become the default spiritual operating system for the next billion users.
+
+⸻
+
+2. Problem Statement
+
+Today spiritual knowledge is:
+
+* Fragmented across books, videos, and commentaries
+* Difficult to access in local languages
+* Hard to contextualize for modern life
+* Often dependent on finding the right teacher or institution
+
+Users increasingly seek answers to:
+
+* Purpose and meaning
+* Relationships
+* Career dilemmas
+* Anxiety and suffering
+* Parenting
+* Death and grief
+* Discipline and self-improvement
+
+Current AI systems provide generic answers without grounding in authentic spiritual sources.
+
+⸻
+
+3. Product Vision
+
+A user should be able to ask:
+
+“I am unhappy in my job. What would the Gita say?”
+
+and receive:
+
+* Relevant verses
+* Simple interpretation
+* Multiple philosophical viewpoints
+* Voice explanation in their preferred language
+* Follow-up conversation
+
+All responses must be traceable to original sources.
+
+⸻
+
+4. Target Users
+
+Primary
+
+Age: 25–55
+
+Urban and semi-urban users
+
+Seeking:
+
+* Spiritual growth
+* Life guidance
+* Stress management
+* Meaning and purpose
+
+⸻
+
+Secondary
+
+Parents
+
+Seeking:
+
+* Storytelling for children
+* Moral education
+* Interactive learning
+
+⸻
+
+Tertiary
+
+Religious institutions
+
+Seeking:
+
+* AI engagement for followers
+* Digital outreach
+* Knowledge dissemination
+
+⸻
+
+5. MVP Scope
+
+Feature 1: Ask Dharma
+
+User asks any question.
+
+Examples:
+
+* What is karma?
+* Why do bad things happen?
+* Should I forgive someone?
+* How do I control anger?
+
+System provides:
+
+* Answer
+* Supporting scripture references
+* Source citations
+* Suggested follow-up questions
+
+⸻
+
+Feature 2: Multi-Perspective Wisdom
+
+User can compare viewpoints.
+
+Example:
+
+Question:
+“What is attachment?”
+
+Output:
+
+Krishna’s View
+
+Buddha’s View
+
+Adi Shankaracharya’s View
+
+Swami Vivekananda’s View
+
+Modern Interpretation
+
+⸻
+
+Feature 3: Spiritual Personas
+
+Users can choose a guide.
+
+Examples:
+
+* Krishna Guide
+* Buddha Guide
+* Vivekananda Guide
+* Ramana Maharshi Guide
+* Chanakya Guide
+
+Persona influences communication style.
+
+All answers remain source grounded.
+
+⸻
+
+Feature 4: Voice Conversations
+
+User speaks naturally.
+
+Platform responds through:
+
+* Hindi
+* Marathi
+* Tamil
+* Telugu
+* Kannada
+* Bengali
+* English
+
+Target latency:
+<3 seconds
+
+⸻
+
+Feature 5: Daily Guidance
+
+Every morning:
+
+* Verse of the day
+* Personalized interpretation
+* 2-minute audio explanation
+
+Every evening:
+
+* Reflection prompt
+* Gratitude exercise
+* Spiritual journal
+
+⸻
+
+6. Non-MVP Roadmap
+
+Phase 2
+
+* Animated avatars
+* Children’s mode
+* Meditation guidance
+* Audio courses
+
+Phase 3
+
+* Temple integrations
+* Guru/community channels
+* Live satsang summaries
+* Spiritual memory graph
+
+Phase 4
+
+* Personalized spiritual journey
+* AI life coach
+* Multi-faith platform
+
+⸻
+
+7. Content Corpus
+
+Initial Sources
+
+Hindu
+
+* Bhagavad Gita
+* Ramayana
+* Mahabharata
+* Upanishads
+* Vedas (selected portions)
+* Yoga Sutras
+
+Commentaries
+
+* Adi Shankaracharya
+* Ramanuja
+* Madhvacharya
+* Swami Vivekananda
+* Ramana Maharshi
+* Chinmaya Mission
+* ISKCON publications
+
+Future
+
+* Buddhist texts
+* Jain scriptures
+* Sikh scriptures
+
+⸻
+
+8. Trust & Safety
+
+Critical Principle:
+
+The platform must never fabricate scripture.
+
+Every answer must include:
+
+* Source text
+* Verse reference
+* Commentary source
+
+The system must distinguish between:
+
+* Scriptural truth
+* Commentary
+* AI interpretation
+
+When uncertainty exists:
+
+“Multiple traditions interpret this differently.”
+
+⸻
+
+9. Technical Architecture
+
+Layer 1
+
+Knowledge Graph
+
+* Scriptures
+* Commentaries
+* Cross-references
+* Themes
+* Concepts
+
+Layer 2
+
+Retrieval Engine
+
+* Semantic search
+* Verse retrieval
+* Commentary retrieval
+
+Layer 3
+
+Reasoning Layer
+
+* LLM orchestration
+* Citation enforcement
+* Hallucination detection
+
+Layer 4
+
+Voice Layer
+
+* Speech-to-text
+* Translation
+* Voice synthesis
+
+Layer 5
+
+Avatar Layer
+
+* Real-time animation
+* Persona rendering
+
+⸻
+
+10. Success Metrics
+
+Year 1
+
+Monthly Active Users:
+100,000+
+
+Daily Active Users:
+25,000+
+
+Day 30 Retention:
+
+25%
+
+Average Session:
+10+ minutes
+
+Questions Asked:
+1 million+
+
+⸻
+
+11. Monetization
+
+Freemium
+
+Free
+
+* Limited queries
+* Text responses
+
+Premium (₹199–499/month)
+
+* Unlimited usage
+* Voice conversations
+* Premium guides
+* Personalized insights
+* Daily spiritual coaching
+
+⸻
+
+Institutional SaaS
+
+Offer white-labeled deployments to:
+
+* Temples
+* Spiritual organizations
+* Religious publishers
+* Educational institutions
+
+Pricing:
+₹5–50 lakh annually
+
+⸻
+
+12. Long-Term Vision
+
+Dharma AI becomes the world’s largest spiritual intelligence platform.
+
+Not a chatbot.
+
+Not a search engine.
+
+A personalized spiritual companion that helps users navigate life through timeless wisdom delivered through modern AI.

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#b8410e" />
+  <title>Dharma AI — Wisdom of the Bhagavad Gita</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <div class="brand">
+        <span class="om">ॐ</span>
+        <div>
+          <h1>Dharma AI</h1>
+          <p class="tagline">Wisdom of the Bhagavad Gita</p>
+        </div>
+      </div>
+      <button id="installBtn" class="install-btn" hidden>Install</button>
+    </header>
+
+    <nav id="personas" class="personas" aria-label="Choose a guide"></nav>
+
+    <main id="chat" class="chat">
+      <div class="welcome" id="welcome">
+        <div class="welcome-om">ॐ</div>
+        <h2>Ask anything. Receive wisdom, with its source.</h2>
+        <p>Every answer is grounded in the Bhagavad Gita and cites the exact verse — never invented.</p>
+        <div class="samples" id="samples">
+          <button>I am unhappy in my job. What would the Gita say?</button>
+          <button>How do I control my anger?</button>
+          <button>Why do I feel anxious about the future?</button>
+          <button>What is my real duty in life?</button>
+        </div>
+      </div>
+    </main>
+
+    <form id="composer" class="composer" autocomplete="off">
+      <button type="button" id="micBtn" class="icon-btn" title="Speak your question" aria-label="Voice input">🎙️</button>
+      <textarea id="input" rows="1" placeholder="Ask Dharma AI…" maxlength="2000"></textarea>
+      <button type="submit" id="sendBtn" class="icon-btn send" title="Send" aria-label="Send">➤</button>
+    </form>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,67 @@
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          envs: GITHUB_TOKEN,ENV_FILE
+          script_stop: true
+          script: |
+            set -e
+
+            # Ensure Docker is installed
+            if ! command -v docker &> /dev/null; then
+              echo "Installing Docker..."
+              apt update && apt install -y docker.io docker-compose-v2 git
+              systemctl enable docker && systemctl start docker
+            fi
+
+            # Ensure swap exists (embeddings + build can be memory-hungry on small boxes)
+            if [ ! -f /swapfile ]; then
+              fallocate -l 2G /swapfile
+              chmod 600 /swapfile
+              mkswap /swapfile
+              swapon /swapfile
+              echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            fi
+
+            REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/SiddharthDedhia/GodAI.git"
+
+            # Clone or pull
+            if [ ! -d "/root/GodAI/.git" ]; then
+              echo "Cloning repo..."
+              rm -rf /root/GodAI
+              git clone "$REPO_URL" /root/GodAI
+            else
+              echo "Pulling latest..."
+              cd /root/GodAI
+              git remote set-url origin "$REPO_URL"
+              git pull origin main
+            fi
+
+            cd /root/GodAI
+
+            # Write .env from GitHub secret
+            echo "$ENV_FILE" > .env
+            echo ".env written from GitHub secret"
+
+            # Build and (re)start
+            docker compose up -d --build --remove-orphans
+            docker image prune -f
+
+            docker compose ps
+            echo "Deployed at $(date)"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
