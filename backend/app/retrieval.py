@@ -36,7 +36,8 @@ def reset_cache() -> None:
     _matrix, _docs = None, None
 
 
-def search(question: str, k: int = 5) -> list[dict]:
+def search(question: str, k: int = 5, sources: list[str] | None = None) -> list[dict]:
+    """Top-k semantically similar passages. If `sources` is given, restrict to those texts."""
     _load()
     assert _matrix is not None and _docs is not None
     q = np.asarray(embed_one(question, input_type="query"), dtype=np.float32)
@@ -44,14 +45,17 @@ def search(question: str, k: int = 5) -> list[dict]:
     if qn:
         q = q / qn
     sims = _matrix @ q
-    top = np.argsort(-sims)[:k]
+    order = np.argsort(-sims)
     results = []
-    for i in top:
+    for i in order:
         d = _docs[int(i)]
+        src = d.get("source", "Bhagavad Gita")
+        if sources is not None and src not in sources:
+            continue
         results.append(
             {
                 "ref": d["ref"],
-                "source": d.get("source", "Bhagavad Gita"),
+                "source": src,
                 "chapter": d.get("chapter"),
                 "verse": d.get("verse"),
                 "sanskrit": d.get("sanskrit"),
@@ -61,4 +65,6 @@ def search(question: str, k: int = 5) -> list[dict]:
                 "score": round(float(sims[int(i)]), 4),
             }
         )
+        if len(results) >= k:
+            break
     return results

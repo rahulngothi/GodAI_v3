@@ -1,8 +1,8 @@
 """Multi-Perspective Wisdom (PRD Feature 2).
 
-One question, answered by several traditions side-by-side — each in its own
-authentic voice, all grounded in the same retrieved verses. A single Kimi call
-produces all views, so they share one set of cited sources.
+One question, answered by several traditions side-by-side — each in its OWN
+voice and grounded in its OWN scripture (Krishna from the Gita, Buddha from the
+Dhammapada, etc.), never borrowing another tradition's verses.
 """
 from __future__ import annotations
 
@@ -13,36 +13,34 @@ from .languages import lang_name
 from .nvidia import chat
 from .retrieval import search
 
+# Each tradition retrieves only from its own source(s). When a text isn't in the
+# corpus yet (Upanishads for Shankara, Vivekananda's works), we fall back to the
+# Gita, which both genuinely commented on / taught.
 TRADITIONS = [
-    {"key": "krishna", "name": "Krishna",
-     "lens": "the Gita's path of selfless action and loving surrender — act without attachment to results; the eternal Self is never touched by loss."},
-    {"key": "buddha", "name": "Buddha",
+    {"key": "krishna", "name": "Krishna", "sources": ["Bhagavad Gita"],
+     "lens": "selfless action and loving surrender — act without attachment to results; the eternal Self is untouched by loss."},
+    {"key": "buddha", "name": "Buddha", "sources": ["Dhammapada"],
      "lens": "the Middle Way — suffering is born of craving and clinging; freedom comes from seeing impermanence and letting go, with compassion."},
-    {"key": "shankara", "name": "Adi Shankaracharya",
-     "lens": "Advaita Vedanta — the changing world is appearance; you are the one non-dual Self (Brahman); sorrow dissolves in that knowledge."},
-    {"key": "vivekananda", "name": "Swami Vivekananda",
+    {"key": "shankara", "name": "Adi Shankaracharya", "sources": ["Bhagavad Gita"],
+     "lens": "Advaita (non-dual) Vedanta — the changing world is appearance; you are the one Self (Brahman); sorrow dissolves in that knowledge."},
+    {"key": "vivekananda", "name": "Swami Vivekananda", "sources": ["Bhagavad Gita"],
      "lens": "practical Vedanta — you are already divine and free; rise in strength, and turn work and service into worship."},
-    {"key": "modern", "name": "Modern Interpretation",
-     "lens": "contemporary psychology and practical daily life — a concrete, compassionate, secular reading of the same wisdom."},
+    {"key": "modern", "name": "Modern Interpretation", "sources": None,
+     "lens": "contemporary psychology and practical daily life — a concrete, compassionate, secular reading."},
 ]
 
-_SYSTEM = """You are a council of {n} wisdom traditions, each answering the SAME question in its OWN authentic voice, all grounded ONLY in the Bhagavad Gita verses given in CONTEXT.
+_SYSTEM = """You are a council of {n} wisdom traditions, each answering the SAME question in its OWN authentic voice. CRUCIAL: each tradition may use ONLY its own passages, listed under its name below. Buddha speaks ONLY from the Dhammapada; Krishna ONLY from the Gita; and so on. NEVER let one tradition quote another's scripture.
 
-The traditions, in order, and the lens each speaks from:
-{lenses}
+{blocks}
 
 RULES:
-- Each view: 45-85 words, alive and in that tradition's distinct voice (first person where natural for Krishna/Buddha/Vivekananda).
-- Ground every view in the provided verses. After a specific teaching, place its source tag exactly as labelled in CONTEXT, e.g. [BG 2.47]. Keep tags in Latin form.
-- NEVER invent verses, numbers, or teachings the verses don't support. If a tradition has little from these verses, let it speak briefly to the spirit without fabricating.
-- Write every view in {language}. Keep the [BG x.y] tags in Latin form.
+- Each view: 45-85 words, alive and in that tradition's distinct voice (first person where natural).
+- Ground each view ONLY in that tradition's own passages above. After a specific teaching, tag its source exactly as labelled, e.g. [BG 2.47] or [Dhammapada 5]. Keep tags in Latin form.
+- NEVER invent verses or use another tradition's passages. If a tradition's passages don't speak to the question, let it answer briefly to the spirit of its teaching without fabricating.
+- Write every view in {language}.
 
 Respond with STRICT JSON only:
 {{"perspectives": [{{"key": "krishna", "view": "...", "used_refs": ["BG x.y"]}}, ... all {n} in order]}}"""
-
-
-def _context(verses: list[dict]) -> str:
-    return "\n".join(f'[{v["ref"]}] "{v["translation"]}"' for v in verses)
 
 
 def _extract_json(raw: str) -> dict | None:
@@ -59,33 +57,43 @@ def _extract_json(raw: str) -> dict | None:
     return None
 
 
-def perspectives(question: str, language: str = "english", k: int = 6) -> dict:
-    verses = search(question, k=k)
-    lenses = "\n".join(f'- {t["name"]}: {t["lens"]}' for t in TRADITIONS)
-    system = _SYSTEM.format(n=len(TRADITIONS), lenses=lenses, language=lang_name(language))
-    user = (
-        f"CONTEXT (Bhagavad Gita verses, translation by Shri Purohit Swami):\n"
-        f"{_context(verses)}\n\nQUESTION: {question}"
+def perspectives(question: str, language: str = "english", per_tradition_k: int = 3) -> dict:
+    # Retrieve each tradition's OWN passages.
+    verses_by_key: dict[str, list[dict]] = {}
+    for t in TRADITIONS:
+        verses_by_key[t["key"]] = search(question, k=per_tradition_k, sources=t["sources"])
+
+    blocks = []
+    for t in TRADITIONS:
+        vs = verses_by_key[t["key"]]
+        src_label = " / ".join(t["sources"]) if t["sources"] else "any source"
+        ctx = "\n".join(f'  [{v["ref"]}] "{v["translation"]}"' for v in vs) or "  (no specific passage — speak to the spirit of your teaching)"
+        blocks.append(f'{t["name"].upper()} — speaks from {src_label}; lens: {t["lens"]}\nPASSAGES (use ONLY these):\n{ctx}')
+
+    system = _SYSTEM.format(n=len(TRADITIONS), blocks="\n\n".join(blocks), language=lang_name(language))
+    raw = chat(
+        [{"role": "system", "content": system}, {"role": "user", "content": f"QUESTION: {question}"}],
+        temperature=0.45, max_tokens=1800,
     )
-    raw = chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
-               temperature=0.4, max_tokens=1800)
     parsed = _extract_json(raw) or {}
     by_key = {p.get("key"): p for p in parsed.get("perspectives", []) if isinstance(p, dict)}
 
     out_perspectives = []
-    all_used: set[str] = set()
+    citations = []
+    seen_refs: set[str] = set()
     for t in TRADITIONS:
         p = by_key.get(t["key"], {})
         view = (p.get("view") or "").strip()
         used = [r for r in (p.get("used_refs") or [])]
-        for r in used:
-            all_used.add(r.replace(" ", ""))
         if view:
             out_perspectives.append({"key": t["key"], "tradition": t["name"], "view": view, "used_refs": used})
-
-    citations = []
-    for v in verses:
-        citations.append({**v, "used": v["ref"].replace(" ", "") in all_used if all_used else True})
+        # citations: this tradition's own retrieved verses (dedup across traditions)
+        used_norm = {r.replace(" ", "") for r in used}
+        for v in verses_by_key[t["key"]]:
+            if v["ref"] in seen_refs:
+                continue
+            seen_refs.add(v["ref"])
+            citations.append({**v, "used": (v["ref"].replace(" ", "") in used_norm) if used_norm else True})
 
     return {
         "question": question,
