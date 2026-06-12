@@ -298,9 +298,9 @@ function wireCitations(wrap) {
   });
 }
 
-function sourcesBlock(citations) {
+function sourcesBlock(citations, showAllIfNoneUsed = false) {
   const used = citations.filter((v) => v.used);
-  const sources = used.length ? used : citations;
+  const sources = used.length ? used : (showAllIfNoneUsed ? citations : []);
   if (!sources.length) return "";
   return `<div class="sources"><div class="sources-h">Sources · ${sources.length} verse${sources.length > 1 ? "s" : ""}</div>${versesHtml(sources)}</div>`;
 }
@@ -336,8 +336,13 @@ function renderResponse(wrap, data) {
         </div>
       </div>
       <div class="answer-text">${renderAnswer(data.answer || "")}</div>
-      ${sourcesBlock(data.citations || [])}
-      <div class="ai-note">🪷 ${escapeHtml(data.persona_name || "This guide")}'s reply is an <b>AI interpretation</b>, grounded in the labeled sources above — scripture and teachers' words are quoted exactly as translated.</div>
+      ${(() => {
+        const src = sourcesBlock(data.citations || []);
+        const note = src
+          ? `<div class="ai-note">🪷 ${escapeHtml(data.persona_name || "This guide")}'s reply is an <b>AI interpretation</b>, grounded in the labeled sources above — scripture and teachers' words are quoted exactly as translated.</div>`
+          : `<div class="ai-note">🪷 Spoken as an <b>AI interpretation</b> in ${escapeHtml(data.persona_name || "this guide")}'s voice. When scripture is quoted, its source appears here.</div>`;
+        return src + note;
+      })()}
       ${followHtml ? `<div class="followups">${followHtml}</div>` : ""}
       <div class="actions"><button class="mini-btn listen">🔊 Listen</button></div>
     </div>`;
@@ -366,7 +371,7 @@ function renderPerspectives(wrap, data) {
       <div class="perspectives-q">“${escapeHtml(data.question)}”</div>
       <div class="perspectives-sub">Five traditions answer, each from its own scripture</div>
       ${views}
-      ${sourcesBlock(data.citations || [])}
+      ${sourcesBlock(data.citations || [], true)}
       <div class="ai-note">🪷 Each view is an <b>AI interpretation</b> in that tradition's voice, grounded only in its own labeled sources above.</div>
       <div class="actions"><button class="mini-btn listen">🔊 Listen all</button></div>
     </div>`;
