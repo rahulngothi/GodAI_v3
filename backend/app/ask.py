@@ -99,7 +99,8 @@ def ask(
     parsed = _extract_json(raw)
     if parsed:
         answer = (parsed.get("answer") or "").strip()
-        answer = re.sub(r"\*[^*\n]{1,60}\*", "", answer)              # stage directions
+        answer = re.sub(r"\*[^*\n]{1,60}\*", "", answer)              # short stage directions: drop
+        answer = answer.replace("*", "")                                # any remaining asterisk markup: unwrap
         answer = re.sub(r"[ \t]{2,}", " ", answer).strip()
         used_refs = parsed.get("used_refs") or []
         followups = [f for f in (parsed.get("followups") or []) if f][:3]
