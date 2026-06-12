@@ -65,26 +65,38 @@ body { font-family: var(--sans); color: var(--ink); background: var(--night); ov
 /* ---- top bar ---- */
 .topbar {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: max(12px, env(safe-area-inset-top)) 16px 8px;
+  flex-wrap: wrap; row-gap: 6px;
+  padding: max(12px, env(safe-area-inset-top)) 14px 8px;
 }
-.brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.brand .om { font-size: 26px; color: var(--gold-soft); text-shadow: var(--glow); }
-.brand .title { font-family: var(--serif); font-size: 21px; color: #fff; margin: 0; letter-spacing: .4px; white-space: nowrap; }
-.topbar-right { display: flex; align-items: center; gap: 7px; }
+.brand { display: flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 1; }
+.brand .om { font-size: 24px; color: var(--gold-soft); text-shadow: var(--glow); flex: 0 0 auto; }
+.brand .title {
+  font-family: var(--serif); font-size: clamp(16px, 4.6vw, 21px); color: #fff; margin: 0;
+  letter-spacing: .4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.topbar-right {
+  display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+  flex: 0 1 auto; min-width: 0; justify-content: flex-end;
+}
 .lang-select {
   background: rgba(255,255,255,.1); color: #fff; border: 1px solid rgba(232,176,75,.45);
-  border-radius: 999px; padding: 7px 11px; font: inherit; font-size: 12.5px; font-weight: 600;
-  cursor: pointer; -webkit-appearance: none; appearance: none; max-width: 124px;
+  border-radius: 999px; padding: 7px 9px; font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; -webkit-appearance: none; appearance: none;
+  max-width: clamp(74px, 24vw, 120px); min-width: 0; flex: 0 1 auto;
+  overflow: hidden; text-overflow: ellipsis;
 }
 .lang-select option { color: var(--ink); background: #fff; }
 .icon-chip {
-  width: 36px; height: 36px; border-radius: 50%; border: 1px solid rgba(255,255,255,.32);
-  background: rgba(255,255,255,.1); color: #fff; font-size: 17px; cursor: pointer; line-height: 1;
+  width: 34px; height: 34px; flex: 0 0 auto; border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.32);
+  background: rgba(255,255,255,.1); color: #fff; font-size: 16px; cursor: pointer; line-height: 1;
+  display: grid; place-items: center; padding: 0;
 }
 .icon-chip:active { transform: scale(.92); }
 .install-btn {
   background: linear-gradient(135deg, var(--gold), var(--saffron)); color: #2a1800; border: none;
-  border-radius: 999px; padding: 8px 13px; font-size: 12.5px; font-weight: 700; cursor: pointer;
+  border-radius: 999px; padding: 8px 11px; font-size: 12px; font-weight: 700; cursor: pointer;
+  flex: 0 0 auto; white-space: nowrap;
 }
 
 /* ---- persona rail (story-style) ---- */
@@ -209,7 +221,7 @@ body { font-family: var(--sans); color: var(--ink); background: var(--night); ov
 .followup:active { border-color: var(--saffron); background: #fff6ec; }
 .followup::before { content: "↳ "; opacity: .6; }
 
-.actions { display: flex; gap: 8px; margin-top: 12px; }
+.actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .mini-btn {
   background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 8px 13px;
   font: inherit; font-size: 12.5px; color: var(--ink-soft); cursor: pointer; font-weight: 600;
@@ -249,7 +261,7 @@ body { font-family: var(--sans); color: var(--ink); background: var(--night); ov
   background: #fff; color: var(--ink);
 }
 .journal-box textarea:focus { outline: none; border-color: var(--saffron); }
-.journal-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.journal-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
 .journal-saved { font-size: 12px; color: #3f7d52; font-weight: 600; }
 .journal-list { margin-top: 14px; }
 .journal-entry {
@@ -388,6 +400,33 @@ body { font-family: var(--sans); color: var(--ink); background: var(--night); ov
   opacity: .65; line-height: 1;
 }
 .pview-listen:active { transform: scale(.9); }
+
+/* overlays never exceed small screens */
+.speak-stage { width: min(240px, 64vw); height: min(240px, 64vw); }
+.speak-face { width: min(152px, 40vw); height: min(152px, 40vw); }
+.convo-text { max-width: min(520px, 92vw); }
+.speak-name { font-size: clamp(18px, 5.5vw, 24px); }
+
+/* small phones */
+@media (max-width: 420px) {
+  .brand .title { display: none; }   /* ॐ alone — frees the header */
+  .topbar { padding-left: 10px; padding-right: 10px; }
+  .persona-rail { padding: 6px 10px 10px; gap: 10px; }
+  .story { width: 60px; }
+  .story-ring { width: 56px; height: 56px; }
+  .chat { padding: 4px 10px 8px; }
+  .welcome .avatar { width: 92px; height: 92px; }
+  .welcome h2 { font-size: 21px; }
+  .samples { gap: 7px; }
+  .sample { padding: 9px 13px; font-size: 12.5px; }
+  .answer-card, .perspectives-card, .daily-card { padding: 13px 13px; }
+  .answer-text { font-size: 15px; }
+  .composer { margin: 0 8px 6px; }
+  .round-btn { width: 42px; height: 42px; }
+  .nav-tab { font-size: 10px; padding: 6px 2px; }
+  .convo-mic { width: 62px; height: 62px; }
+  .mini-btn { padding: 7px 10px; font-size: 12px; }
+}
 
 /* desktop niceties */
 @media (min-width: 640px) {

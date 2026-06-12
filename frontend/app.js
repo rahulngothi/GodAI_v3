@@ -565,18 +565,30 @@ if (SR) {
 let speakingBtn = null;
 let activeStage = null;
 
-// Prefer deep male Indian voices, then "natural/neural" voices; lower pitch so it
-// never sounds childlike.
-function pickVoice(lang) {
-  const voices = window.speechSynthesis.getVoices();
-  const pref = /(ravi|hemant|prabhat|madhur|valluvar|male)/i;
-  const natural = /(natural|neural|online)/i;
+// Voices load ASYNC in browsers — getVoices() is often empty on first call.
+let _voicesPromise = null;
+function loadVoices() {
+  if (_voicesPromise) return _voicesPromise;
+  _voicesPromise = new Promise((resolve) => {
+    const have = window.speechSynthesis.getVoices();
+    if (have.length) return resolve(have);
+    window.speechSynthesis.onvoiceschanged = () => resolve(window.speechSynthesis.getVoices());
+    setTimeout(() => resolve(window.speechSynthesis.getVoices()), 1500);
+  });
+  return _voicesPromise;
+}
+
+// Prefer deep male Indian voices, then natural ones; match by language family.
+function pickVoice(voices, lang) {
+  const two = lang.slice(0, 2);
+  const pref = /(ravi|hemant|prabhat|madhur|swara|valluvar|male)/i;
+  const natural = /(natural|neural|online|google)/i;
   return (
     voices.find((v) => v.lang === lang && pref.test(v.name)) ||
-    voices.find((v) => v.lang.startsWith(lang.slice(0, 2)) && pref.test(v.name)) ||
+    voices.find((v) => v.lang.startsWith(two) && pref.test(v.name)) ||
     voices.find((v) => v.lang === lang && natural.test(v.name)) ||
     voices.find((v) => v.lang === lang) ||
-    voices.find((v) => v.lang.startsWith(lang.slice(0, 2)))
+    voices.find((v) => v.lang.replace("_", "-").startsWith(two))
   );
 }
 
@@ -584,20 +596,37 @@ function cleanForSpeech(text) {
   return text.replace(/\[[^\]]*\d[^\]]*\]/g, "").replace(/\s{2,}/g, " ").trim();
 }
 
-function speakRaw(text, stageEl, onend) {
+const LANG_LABEL = { hi: "Hindi", mr: "Marathi", ta: "Tamil", te: "Telugu", kn: "Kannada", bn: "Bengali", en: "English" };
+
+function speakRaw(text, stageEl, onend, onnovoice) {
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = bcp47();
-  const v = pickVoice(u.lang);
-  if (v) u.voice = v;
-  u.rate = 0.95;
-  u.pitch = 0.82; // deeper, calmer — no baby voice
-  activeStage = stageEl;
-  stageEl.classList.add("talking");
-  const done = () => { stageEl.classList.remove("talking"); activeStage = null; if (onend) onend(); };
-  u.onend = done;
-  u.onerror = done;
-  window.speechSynthesis.speak(u);
+  loadVoices().then((voices) => {
+    const lang = bcp47();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    const v = pickVoice(voices, lang);
+    if (v) u.voice = v;
+    u.rate = 0.95;
+    u.pitch = 0.82; // deeper, calmer — no baby voice
+    activeStage = stageEl;
+    stageEl.classList.add("talking");
+    let spoke = false;
+    u.onstart = () => { spoke = true; };
+    const done = () => {
+      stageEl.classList.remove("talking");
+      activeStage = null;
+      // Device has no voice for this language: tell the user instead of silent failure.
+      if (!spoke && !v && lang.slice(0, 2) !== "en" && onnovoice) {
+        onnovoice(LANG_LABEL[lang.slice(0, 2)] || lang);
+      }
+      if (onend) onend();
+    };
+    u.onend = done;
+    u.onerror = done;
+    window.speechSynthesis.speak(u);
+    // Safety: if nothing started within 3s and no voice exists, surface the issue.
+    setTimeout(() => { if (!spoke && !v && lang.slice(0, 2) !== "en") { window.speechSynthesis.cancel(); } }, 3000);
+  });
 }
 
 function stopSpeaking() {
@@ -619,7 +648,9 @@ function speak(text, btn, personaKey) {
 
   speakingBtn = btn;
   if (btn) { btn.classList.add("speaking"); btn.textContent = "⏹ Stop"; }
-  speakRaw(clean, document.getElementById("speakStage"), () => { stopSpeaking(); });
+  speakRaw(clean, document.getElementById("speakStage"), () => { stopSpeaking(); }, (langName) => {
+    document.querySelector(".speak-hint").textContent = `your device has no ${langName} voice installed — reply shown as text in the chat 🙏`;
+  });
 }
 
 speakOverlay.addEventListener("click", stopSpeaking);
@@ -675,7 +706,11 @@ async function convoAsk(question) {
     convoOverlay.classList.add("talking");
     speakRaw(spoken, convoStage, () => {
       convoOverlay.classList.remove("talking");
-      convoStatus.textContent = "tap the mic to reply";
+      if (!convoStatus.dataset.novoice) convoStatus.textContent = "tap the mic to reply";
+      delete convoStatus.dataset.novoice;
+    }, (langName) => {
+      convoStatus.dataset.novoice = "1";
+      convoStatus.textContent = `⚠ your device has no ${langName} voice — read the reply below, then tap the mic`;
     });
   } catch (e) {
     wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">🙏 ${escapeHtml(e.message)}</div></div>`;
