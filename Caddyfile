@@ -1,0 +1,5 @@
+# Auto-HTTPS via Let's Encrypt. sslip.io resolves 5-161-54-57.sslip.io -> 5.161.54.57
+# (no domain purchase needed). Caddy fetches + renews the TLS cert automatically.
+5-161-54-57.sslip.io {
+	reverse_proxy app:8080
+}
