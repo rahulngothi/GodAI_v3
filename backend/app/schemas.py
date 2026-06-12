@@ -65,3 +65,27 @@ class DailyResponse(BaseModel):
     reflection: str
     practice: str                   # gratitude / action prompt
     journal_prompt: str
+
+
+# ---- Auth ----
+class LoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=1, max_length=128)
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+
+
+# ---- Journal ----
+class JournalSaveRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=5000)
+    prompt: str | None = None       # the journal prompt being answered, if any
+
+
+class JournalEntry(BaseModel):
+    id: str
+    date: str
+    prompt: str | None = None
+    text: str

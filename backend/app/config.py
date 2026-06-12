@@ -33,5 +33,8 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
+    # Auth (token signing). Override via JWT_SECRET in .env for production.
+    jwt_secret: str = "dharma-dev-secret-change-me"
+
 
 settings = Settings()

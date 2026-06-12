@@ -216,6 +216,52 @@ body {
 .icon-btn.listening { background: #e23b3b; color: #fff; animation: pulse 1s infinite; }
 @keyframes pulse { 0%,100%{ box-shadow: 0 0 0 0 rgba(226,59,59,.5);} 50%{ box-shadow: 0 0 0 10px rgba(226,59,59,0);} }
 
+/* ---- login ---- */
+.login-overlay {
+  position: fixed; inset: 0; z-index: 100; display: grid; place-items: center;
+  background: rgba(20, 12, 40, .72); backdrop-filter: blur(10px);
+}
+.login-card {
+  width: min(360px, 88vw); text-align: center;
+  background: linear-gradient(180deg, var(--parchment), var(--cream));
+  border: 1px solid var(--line); border-radius: 22px; padding: 30px 26px;
+  box-shadow: var(--card-shadow); display: flex; flex-direction: column; gap: 11px;
+}
+.login-om { font-size: 46px; color: var(--saffron); text-shadow: var(--glow); }
+.login-card h2 { font-family: var(--serif); font-weight: 400; margin: 0; color: var(--ink); }
+.login-card p { margin: 0 0 6px; font-size: 13.5px; color: var(--ink-soft); }
+.login-card input {
+  border: 1.5px solid var(--line); border-radius: 12px; padding: 12px 14px;
+  font: inherit; font-size: 15px; background: #fff; color: var(--ink);
+}
+.login-card input:focus { outline: none; border-color: var(--saffron); }
+.login-btn {
+  margin-top: 4px; border: none; border-radius: 12px; padding: 13px;
+  background: linear-gradient(135deg, var(--gold), var(--saffron)); color: #2a1800;
+  font: inherit; font-size: 15px; font-weight: 700; cursor: pointer;
+}
+.login-btn:hover { box-shadow: var(--glow); }
+.login-error { color: #b8410e; font-size: 13px; }
+
+/* ---- journal ---- */
+.journal-box { margin-top: 14px; }
+.journal-box textarea {
+  width: 100%; min-height: 84px; resize: vertical; border: 1.5px solid var(--line);
+  border-radius: 12px; padding: 11px 13px; font: inherit; font-size: 14.5px;
+  background: #fff; color: var(--ink); box-sizing: border-box;
+}
+.journal-box textarea:focus { outline: none; border-color: var(--saffron); }
+.journal-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+.journal-saved { font-size: 12.5px; color: #3f7d52; font-weight: 600; }
+.journal-list { margin-top: 16px; }
+.journal-entry {
+  background: #fff; border: 1px solid var(--line); border-left: 4px solid var(--gold);
+  border-radius: 11px; padding: 11px 13px; margin-bottom: 9px;
+}
+.journal-entry-date { font-size: 11px; color: var(--ink-soft); font-weight: 700; margin-bottom: 3px; }
+.journal-entry-prompt { font-size: 12.5px; color: var(--saffron-deep); font-style: italic; margin-bottom: 4px; }
+.journal-entry-text { font-size: 14px; line-height: 1.55; color: #36291c; white-space: pre-wrap; }
+
 /* ---- mode bar ---- */
 .modebar { display: flex; gap: 6px; padding: 0 20px 12px; }
 .mode-tab {

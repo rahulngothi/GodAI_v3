@@ -43,6 +43,70 @@ function clearChat() {
 const bcp47 = () => LANG_BCP[currentLanguage] || "en-IN";
 const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+// ---- auth ----
+let token = localStorage.getItem("dharma_token") || "";
+const loginOverlay = document.getElementById("loginOverlay");
+const logoutBtn = document.getElementById("logoutBtn");
+
+function showLogin(show) {
+  loginOverlay.hidden = !show;
+  logoutBtn.hidden = show;
+}
+
+async function apiFetch(path, opts = {}) {
+  opts.headers = { ...(opts.headers || {}), Authorization: `Bearer ${token}` };
+  const res = await fetch(`${API}${path}`, opts);
+  if (res.status === 401) {
+    token = ""; localStorage.removeItem("dharma_token");
+    showLogin(true);
+    throw new Error("Please sign in.");
+  }
+  if (!res.ok) {
+    let msg = "server " + res.status;
+    try { const j = await res.json(); if (j.detail) msg = j.detail; } catch (e) {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+document.getElementById("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const errEl = document.getElementById("loginError");
+  errEl.hidden = true;
+  try {
+    const res = await fetch(`${API}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("loginUser").value.trim(),
+        password: document.getElementById("loginPass").value,
+      }),
+    });
+    if (!res.ok) throw new Error((await res.json()).detail || "Sign-in failed");
+    const data = await res.json();
+    token = data.token;
+    localStorage.setItem("dharma_token", token);
+    showLogin(false);
+  } catch (err) {
+    errEl.textContent = err.message;
+    errEl.hidden = false;
+  }
+});
+
+logoutBtn.addEventListener("click", () => {
+  token = ""; localStorage.removeItem("dharma_token");
+  clearChat();
+  showLogin(true);
+});
+
+async function initAuth() {
+  if (!token) { showLogin(true); return; }
+  try {
+    await apiFetch("/api/auth/me");
+    showLogin(false);
+  } catch (e) { /* apiFetch already showed login */ }
+}
+
 // ---- persona medallion art (symbol + gradient per guide) ----
 const PERSONA_ART = {
   guide:       { grad: ["#e8b04b", "#f0962e"], om: true },
@@ -223,6 +287,14 @@ function renderDaily(data) {
       <div class="daily-block"><div class="daily-h">Reflection</div><p>${escapeHtml(data.reflection)}</p></div>
       <div class="daily-block"><div class="daily-h">${data.period === "morning" ? "Today's practice" : "Evening practice"}</div><p>${escapeHtml(data.practice)}</p></div>
       <div class="daily-journal">✍️ ${escapeHtml(data.journal_prompt)}</div>
+      <div class="journal-box">
+        <textarea id="journalText" placeholder="Write your reflection here…"></textarea>
+        <div class="journal-actions">
+          <button class="mini-btn" id="journalSave">💾 Save to journal</button>
+          <span class="journal-saved" id="journalStatus"></span>
+        </div>
+        <div class="journal-list" id="journalList"></div>
+      </div>
       <div class="actions"><button class="mini-btn listen">🔊 Listen</button></div>
       ${sourcesBlock([data.verse])}
     </div>`;
@@ -230,18 +302,54 @@ function renderDaily(data) {
   wireCitations(wrap);
   const spoken = `${data.reflection} ${data.practice}`;
   wrap.querySelector(".listen").onclick = (e) => speak(spoken, e.currentTarget);
+  wrap.querySelector("#journalSave").onclick = () => {
+    const txt = wrap.querySelector("#journalText").value.trim();
+    if (txt) saveJournal(txt, data.journal_prompt, wrap.querySelector("#journalStatus"));
+  };
   scrollDown();
 }
 
 async function loadDaily() {
   const wrap = addTyping();
   try {
-    const res = await fetch(`${API}/api/daily?language=${currentLanguage}`);
+    const data = await apiFetch(`/api/daily?language=${currentLanguage}`);
     wrap.remove();
-    renderDaily(await res.json());
+    renderDaily(data);
+    loadJournal();
   } catch (e) {
-    wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">Could not load today's guidance.</div></div>`;
+    wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">${escapeHtml(e.message)}</div></div>`;
   }
+}
+
+// ---- journal ----
+async function saveJournal(text, prompt, statusEl) {
+  try {
+    await apiFetch("/api/journal", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, prompt }),
+    });
+    statusEl.textContent = "Saved 🙏";
+    loadJournal();
+  } catch (e) {
+    statusEl.textContent = e.message;
+  }
+}
+
+async function loadJournal() {
+  let listEl = document.getElementById("journalList");
+  if (!listEl) return;
+  try {
+    const entries = await apiFetch("/api/journal");
+    listEl.innerHTML = entries.length
+      ? `<div class="sources-h">Your journal</div>` + entries.map((en) => `
+        <div class="journal-entry">
+          <div class="journal-entry-date">${escapeHtml(en.date)}</div>
+          ${en.prompt ? `<div class="journal-entry-prompt">${escapeHtml(en.prompt)}</div>` : ""}
+          <div class="journal-entry-text">${escapeHtml(en.text)}</div>
+        </div>`).join("")
+      : "";
+  } catch (e) { /* quiet */ }
 }
 
 async function send(question) {
@@ -256,13 +364,11 @@ async function send(question) {
     const body = perspectivesMode
       ? { question, language: currentLanguage }
       : { question, persona: currentPersona, language: currentLanguage, history: history.slice(-6) };
-    const res = await fetch(url, {
+    const data = await apiFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error("server " + res.status);
-    const data = await res.json();
     if (perspectivesMode) {
       renderPerspectives(wrap, data);
     } else {
@@ -344,5 +450,6 @@ installBtn.onclick = async () => { if (!deferredPrompt) return; deferredPrompt.p
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
 
 // ---- init ----
+initAuth();
 loadPersonas();
 loadLanguages();

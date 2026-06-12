@@ -7,9 +7,16 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+import datetime as _dt
+
+from bson import ObjectId
+from fastapi import Depends
+
 from . import ask as ask_module
 from . import daily as daily_module
 from . import perspectives as perspectives_module
+from . import ratelimit
+from .auth import authenticate, create_token, get_current_user
 from .config import settings
 from .db import VERSES, get_db
 from .languages import LANGUAGES
@@ -18,6 +25,10 @@ from .schemas import (
     AskRequest,
     AskResponse,
     DailyResponse,
+    JournalEntry,
+    JournalSaveRequest,
+    LoginRequest,
+    LoginResponse,
     PerspectivesRequest,
     PerspectivesResponse,
 )
@@ -63,8 +74,21 @@ def list_languages():
     ]
 
 
+@app.post("/api/auth/login", response_model=LoginResponse)
+def login(req: LoginRequest):
+    if not authenticate(req.username, req.password):
+        raise HTTPException(status_code=401, detail="Wrong username or password.")
+    return {"token": create_token(req.username), "username": req.username}
+
+
+@app.get("/api/auth/me")
+def me(user: str = Depends(get_current_user)):
+    return {"username": user}
+
+
 @app.post("/api/ask", response_model=AskResponse)
-def ask_endpoint(req: AskRequest):
+def ask_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
+    ratelimit.check(user)
     try:
         return ask_module.ask(
             req.question,
@@ -77,7 +101,8 @@ def ask_endpoint(req: AskRequest):
 
 
 @app.post("/api/perspectives", response_model=PerspectivesResponse)
-def perspectives_endpoint(req: PerspectivesRequest):
+def perspectives_endpoint(req: PerspectivesRequest, user: str = Depends(get_current_user)):
+    ratelimit.check(user)
     try:
         return perspectives_module.perspectives(req.question, language=req.language)
     except Exception as e:
@@ -85,11 +110,49 @@ def perspectives_endpoint(req: PerspectivesRequest):
 
 
 @app.get("/api/daily", response_model=DailyResponse)
-def daily_endpoint(period: str | None = None, language: str = "english"):
+def daily_endpoint(
+    period: str | None = None,
+    language: str = "english",
+    user: str = Depends(get_current_user),
+):
+    ratelimit.check(user)
     try:
         return daily_module.daily(period=period, language=language)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+# ---- Journal (per user) ----
+@app.post("/api/journal", response_model=JournalEntry)
+def journal_save(req: JournalSaveRequest, user: str = Depends(get_current_user)):
+    doc = {
+        "user": user,
+        "date": _dt.date.today().isoformat(),
+        "prompt": req.prompt,
+        "text": req.text.strip(),
+        "created_at": _dt.datetime.now(_dt.timezone.utc),
+    }
+    res = get_db()["journal"].insert_one(doc)
+    return {"id": str(res.inserted_id), "date": doc["date"], "prompt": doc["prompt"], "text": doc["text"]}
+
+
+@app.get("/api/journal", response_model=list[JournalEntry])
+def journal_list(user: str = Depends(get_current_user)):
+    docs = get_db()["journal"].find({"user": user}).sort("created_at", -1).limit(50)
+    return [
+        {"id": str(d["_id"]), "date": d["date"], "prompt": d.get("prompt"), "text": d["text"]}
+        for d in docs
+    ]
+
+
+@app.delete("/api/journal/{entry_id}")
+def journal_delete(entry_id: str, user: str = Depends(get_current_user)):
+    try:
+        oid = ObjectId(entry_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Bad entry id")
+    res = get_db()["journal"].delete_one({"_id": oid, "user": user})
+    return {"deleted": res.deleted_count == 1}
 
 
 # Serve the web UI (mounted last so /api/* routes win).

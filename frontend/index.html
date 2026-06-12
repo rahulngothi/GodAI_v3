@@ -17,6 +17,18 @@
   <div class="bg-aura"></div>
   <div class="bg-mandala"></div>
 
+  <div id="loginOverlay" class="login-overlay" hidden>
+    <form id="loginForm" class="login-card" autocomplete="on">
+      <div class="login-om">ॐ</div>
+      <h2>Dharma AI</h2>
+      <p>Sign in to begin your conversation.</p>
+      <input id="loginUser" type="text" placeholder="Username" autocomplete="username" required />
+      <input id="loginPass" type="password" placeholder="Password" autocomplete="current-password" required />
+      <button type="submit" class="login-btn">Enter</button>
+      <div id="loginError" class="login-error" hidden></div>
+    </form>
+  </div>
+
   <div id="app">
     <header class="topbar">
       <div class="brand">
@@ -29,6 +41,7 @@
       <div class="topbar-right">
         <button id="clearBtn" class="clear-btn" title="New conversation" aria-label="New conversation">↺</button>
         <select id="language" class="lang-select" aria-label="Conversation language"></select>
+        <button id="logoutBtn" class="clear-btn" title="Sign out" aria-label="Sign out" hidden>⎋</button>
         <button id="installBtn" class="install-btn" hidden>Install</button>
       </div>
     </header>
