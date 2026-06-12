@@ -71,6 +71,11 @@ body {
   cursor: pointer; -webkit-appearance: none; appearance: none; backdrop-filter: blur(8px);
 }
 .lang-select option { color: var(--ink); background: #fff; }
+.clear-btn {
+  width: 38px; height: 38px; flex: 0 0 auto; border-radius: 50%; border: 1px solid rgba(255,255,255,.4);
+  background: rgba(255,255,255,.12); color: #fff; font-size: 19px; cursor: pointer; line-height: 1;
+}
+.clear-btn:hover { background: rgba(255,255,255,.24); transform: rotate(-45deg); transition: transform .2s; }
 .install-btn {
   background: linear-gradient(135deg, var(--gold), var(--saffron)); color: #2a1800; border: none;
   border-radius: 999px; padding: 8px 15px; font-size: 13px; font-weight: 700; cursor: pointer;
@@ -253,7 +258,22 @@ body {
 }
 
 @media (max-width: 480px) {
-  .brand .title { font-size: 21px; }
-  .welcome h2 { font-size: 23px; }
+  .topbar { padding-left: 14px; padding-right: 14px; }
+  .brand { gap: 9px; }
+  .brand .title { font-size: 19px; }
+  .brand .tagline { display: none; }
+  .brand .om { font-size: 27px; }
+  .topbar-right { gap: 6px; }
+  .lang-select { max-width: 116px; font-size: 12px; padding: 7px 9px; }
+  .clear-btn { width: 36px; height: 36px; }
+  .persona-rail { padding: 4px 14px 12px; gap: 9px; }
+  .persona-card { width: 104px; padding: 12px 8px; }
+  .persona-medallion { width: 50px; height: 50px; }
+  .modebar { padding: 0 14px 10px; gap: 5px; }
+  .mode-tab { font-size: 12px; padding: 10px 4px; }
+  .chat { padding: 6px 12px 8px; }
+  .welcome h2 { font-size: 22px; }
+  .welcome p { font-size: 13.5px; }
   .answer-text { font-size: 15.5px; }
+  .answer-card, .perspectives-card, .daily-card { padding: 15px 16px; }
 }

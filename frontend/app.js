@@ -3,6 +3,7 @@ const API = "";
 let currentPersona = "guide";
 let currentLanguage = "english";
 let currentMode = "converse"; // converse | perspectives | daily
+let history = [];             // [{role, content}] for the current conversation
 const LANG_BCP = { english: "en-IN" };
 
 const chat = document.getElementById("chat");
@@ -10,8 +11,34 @@ const input = document.getElementById("input");
 const composer = document.getElementById("composer");
 const personasNav = document.getElementById("personas");
 const micBtn = document.getElementById("micBtn");
-const welcome = document.getElementById("welcome");
 const languageSel = document.getElementById("language");
+
+const WELCOME_HTML = `
+  <div class="welcome" id="welcome">
+    <div class="welcome-om">ॐ</div>
+    <h2>Sit with a guide.<br />Ask what weighs on your heart.</h2>
+    <p>Speak or type any question. Every answer is grounded in scripture — with the exact verse, never invented.</p>
+    <div class="samples" id="samples">
+      <button class="sample">I feel lost in my career. What should I do?</button>
+      <button class="sample">How do I let go of anger?</button>
+      <button class="sample">Why do I fear the future so much?</button>
+      <button class="sample">What is my true purpose?</button>
+    </div>
+  </div>`;
+
+function clearChat() {
+  history = [];
+  if (currentMode === "converse") {
+    chat.innerHTML = WELCOME_HTML;
+  } else if (currentMode === "perspectives") {
+    chat.innerHTML = `<div class="welcome" id="welcome"><div class="welcome-om">☸</div>
+      <h2>Many Views</h2><p>Ask one question and hear it answered side-by-side by Krishna, Buddha,
+      Shankaracharya, Vivekananda, and a modern voice.</p></div>`;
+  } else {
+    chat.innerHTML = "";
+  }
+  if (window.speechSynthesis) window.speechSynthesis.cancel();
+}
 
 const bcp47 = () => LANG_BCP[currentLanguage] || "en-IN";
 const escapeHtml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -85,6 +112,7 @@ async function loadPersonas() {
       card.innerHTML = `${medallionHTML(p.key)}<div class="persona-name">${escapeHtml(p.name)}</div><div class="persona-essence">${escapeHtml(p.blurb || "")}</div>`;
       card.onclick = () => {
         currentPersona = p.key;
+        history = []; // new guide → fresh thread (don't carry another's voice)
         document.querySelectorAll(".persona-card").forEach((x) => x.classList.toggle("active", x.dataset.key === p.key));
       };
       personasNav.appendChild(card);
@@ -113,7 +141,7 @@ async function loadLanguages() {
 
 // ---- messaging ----
 function addUser(text) {
-  if (welcome) welcome.remove();
+  document.getElementById("welcome")?.remove();
   const wrap = document.createElement("div");
   wrap.className = "msg user";
   wrap.innerHTML = `<div class="bubble-user"></div>`;
@@ -184,7 +212,7 @@ function renderPerspectives(wrap, data) {
 }
 
 function renderDaily(data) {
-  if (welcome) welcome.remove();
+  document.getElementById("welcome")?.remove();
   const wrap = document.createElement("div");
   wrap.className = "msg ai";
   wrap.innerHTML = `
@@ -227,7 +255,7 @@ async function send(question) {
     const url = perspectivesMode ? `${API}/api/perspectives` : `${API}/api/ask`;
     const body = perspectivesMode
       ? { question, language: currentLanguage }
-      : { question, persona: currentPersona, language: currentLanguage };
+      : { question, persona: currentPersona, language: currentLanguage, history: history.slice(-6) };
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -235,8 +263,13 @@ async function send(question) {
     });
     if (!res.ok) throw new Error("server " + res.status);
     const data = await res.json();
-    if (perspectivesMode) renderPerspectives(wrap, data);
-    else renderResponse(wrap, data);
+    if (perspectivesMode) {
+      renderPerspectives(wrap, data);
+    } else {
+      renderResponse(wrap, data);
+      history.push({ role: "user", content: question });
+      history.push({ role: "assistant", content: data.answer || "" });
+    }
   } catch (e) {
     wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">🙏 Something interrupted us: ${escapeHtml(e.message)}.</div></div>`;
   }
@@ -250,6 +283,7 @@ function setMode(mode) {
   if (mode === "perspectives") input.placeholder = "Ask once, hear every tradition…";
   else if (mode === "converse") input.placeholder = "Ask your guide…";
   composer.style.display = mode === "daily" ? "none" : "flex";
+  clearChat();
   if (mode === "daily") loadDaily();
 }
 document.getElementById("modebar").addEventListener("click", (e) => {
@@ -257,10 +291,13 @@ document.getElementById("modebar").addEventListener("click", (e) => {
   if (tab) setMode(tab.dataset.mode);
 });
 
+// New-conversation button
+document.getElementById("clearBtn")?.addEventListener("click", clearChat);
+
 composer.addEventListener("submit", (e) => { e.preventDefault(); send(); });
 input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } });
 input.addEventListener("input", () => { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 140) + "px"; });
-document.getElementById("samples")?.addEventListener("click", (e) => { if (e.target.classList.contains("sample")) send(e.target.textContent); });
+chat.addEventListener("click", (e) => { const s = e.target.closest(".sample"); if (s) send(s.textContent); });
 
 // ---- voice: speech-to-text (in the chosen language) ----
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;

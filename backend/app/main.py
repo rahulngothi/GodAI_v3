@@ -66,7 +66,12 @@ def list_languages():
 @app.post("/api/ask", response_model=AskResponse)
 def ask_endpoint(req: AskRequest):
     try:
-        return ask_module.ask(req.question, persona_key=req.persona, language=req.language)
+        return ask_module.ask(
+            req.question,
+            persona_key=req.persona,
+            language=req.language,
+            history=[t.model_dump() for t in req.history],
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 

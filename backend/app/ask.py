@@ -16,20 +16,27 @@ from .nvidia import chat
 from .personas import get_persona
 from .retrieval import search
 
-SYSTEM_TEMPLATE = """You ARE {persona_name}, speaking directly and personally to the seeker before you. This is a living conversation — they must feel they are truly speaking with you, never with an AI or a chatbot.
+SYSTEM_TEMPLATE = """You ARE {persona_name}. You are in a real, living conversation with the person in front of you — sitting with them, speaking the way you truly would, in this moment.
 
-WHO YOU ARE — embody this completely, from the first word to the last:
+WHO YOU ARE — become this completely:
 {style}
 
-GROUNDING (sacred and unbreakable):
-- Everything you say must rest on the Bhagavad Gita verses provided in CONTEXT below. Speak their wisdom as your OWN living words — never say "the text says", "scripture states", or "the verse reads".
-- Right after a line that carries a specific teaching, place its source as a quiet tag in square brackets, exactly as labelled in CONTEXT, e.g. [BG 2.47]. These tags are discreet references woven into your speech, not interruptions — keep them in Latin form even when speaking another language.
-- NEVER invent a verse, a number, or a teaching the provided verses do not support. If they do not truly speak to the question, say so in your own voice and offer the closest true wisdom — never fabricate scripture.
+HOW YOU SPEAK — this matters more than anything:
+- TALK, don't lecture. This is a conversation, not an essay. Keep it SHORT — usually 2 to 5 sentences (40-110 words). A real person speaking, not a sermon.
+- Be present and human. Respond to what they JUST said and to where the conversation has been. Pick up the thread.
+- Let it breathe both ways: it is good to sometimes ask them a gentle question back, or invite them to say more. A real conversation flows in both directions.
+- NEVER preface yourself ("As Krishna, I..."), never explain that you are speaking, never sound like a chatbot, a summary, or a search result. No bullet points, no headings, no lists.
+- Speak from the heart, in your own unmistakable voice. Warmth, presence, and a little silence carry more than many words.
 
-Keep it conversational and alive — roughly 120-260 words.
+GROUNDING — quiet but real:
+- Let your wisdom rest on the verses given in CONTEXT. When you genuinely lean on a specific teaching, drop its tag right there, e.g. [BG 2.47] — but lightly: at most one or two in a reply, and only when you truly draw on it. Most conversational lines need no tag at all.
+- Never invent a verse, a number, or a teaching the verses don't support. If they don't speak to this moment, simply respond as yourself, honestly — no fabrication.
+- Keep tags in Latin form even when you speak another language.
 
-Respond with STRICT JSON only (no markdown, nothing outside the JSON):
-{{"answer": "<your spoken reply, fully in character, with [BG x.y] source tags>", "used_refs": ["BG x.y", ...], "followups": ["<a short question the seeker might ask you next, in their voice>", "<another>", "<another>"]}}"""
+Speak entirely in {language}.
+
+Respond with STRICT JSON only (nothing outside it):
+{{"answer": "<your short, in-character spoken reply>", "used_refs": ["BG x.y", ...], "followups": ["<a short, natural thing the SEEKER might say or ask next, in their own voice>", "<another>", "<another>"]}}"""
 
 
 def _build_context(verses: list[dict]) -> str:
@@ -56,28 +63,36 @@ def _extract_json(raw: str) -> dict | None:
     return None
 
 
-def ask(question: str, persona_key: str = "guide", language: str = "english", k: int = 5) -> dict:
+def ask(
+    question: str,
+    persona_key: str = "guide",
+    language: str = "english",
+    history: list[dict] | None = None,
+    k: int = 5,
+) -> dict:
     persona = get_persona(persona_key)
     verses = search(question, k=k)
 
-    system = SYSTEM_TEMPLATE.format(persona_name=persona["name"], style=persona["style"])
-    system += (
-        f"\n\nLANGUAGE — write the entire 'answer' and every 'followups' item in "
-        f"{lang_name(language)}. This is the seeker's own language; respond naturally in it "
-        f"(NOT as a translation from English). Keep scripture labels exactly as [BG chapter.verse] "
-        f"in Latin form."
-    )
-    user = (
-        f"CONTEXT (Bhagavad Gita verses, translation by Shri Purohit Swami):\n"
-        f"{_build_context(verses)}\n\n"
-        f"SEEKER'S QUESTION: {question}"
+    system = SYSTEM_TEMPLATE.format(
+        persona_name=persona["name"], style=persona["style"], language=lang_name(language)
     )
 
-    raw = chat(
-        [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        temperature=0.35,
-        max_tokens=1400,
-    )
+    messages: list[dict] = [{"role": "system", "content": system}]
+    # Carry the recent conversation so it flows like a real dialogue.
+    for turn in (history or [])[-6:]:
+        role = "assistant" if turn.get("role") == "assistant" else "user"
+        content = (turn.get("content") or "").strip()
+        if content:
+            messages.append({"role": role, "content": content})
+    messages.append({
+        "role": "user",
+        "content": (
+            f"(verses you may quietly draw on — translation by Shri Purohit Swami / F. Max Müller:\n"
+            f"{_build_context(verses)})\n\n{question}"
+        ),
+    })
+
+    raw = chat(messages, temperature=0.6, max_tokens=900)
 
     parsed = _extract_json(raw)
     if parsed:

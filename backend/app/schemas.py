@@ -17,10 +17,16 @@ class Citation(BaseModel):
 
 
 # ---- Ask (single guide) ----
+class Turn(BaseModel):
+    role: str   # "user" | "assistant"
+    content: str
+
+
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=2000)
     persona: str = "guide"
     language: str = "english"
+    history: list[Turn] = []
 
 
 class AskResponse(BaseModel):
