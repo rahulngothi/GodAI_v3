@@ -21,9 +21,9 @@ TRADITIONS = [
      "lens": "selfless action and loving surrender — act without attachment to results; the eternal Self is untouched by loss."},
     {"key": "buddha", "name": "Buddha", "sources": ["Dhammapada"],
      "lens": "the Middle Way — suffering is born of craving and clinging; freedom comes from seeing impermanence and letting go, with compassion."},
-    {"key": "shankara", "name": "Adi Shankaracharya", "sources": ["Bhagavad Gita"],
+    {"key": "shankara", "name": "Adi Shankaracharya", "sources": ["Upanishads"],
      "lens": "Advaita (non-dual) Vedanta — the changing world is appearance; you are the one Self (Brahman); sorrow dissolves in that knowledge."},
-    {"key": "vivekananda", "name": "Swami Vivekananda", "sources": ["Bhagavad Gita"],
+    {"key": "vivekananda", "name": "Swami Vivekananda", "sources": ["Vivekananda (Complete Works)"],
      "lens": "practical Vedanta — you are already divine and free; rise in strength, and turn work and service into worship."},
     {"key": "modern", "name": "Modern Interpretation", "sources": None,
      "lens": "contemporary psychology and practical daily life — a concrete, compassionate, secular reading."},
@@ -34,13 +34,14 @@ _SYSTEM = """You are a council of {n} wisdom traditions, each answering the SAME
 {blocks}
 
 RULES:
-- Each view: 45-85 words, alive and in that tradition's distinct voice (first person where natural).
+- You MUST return ALL {n} traditions, in order, each with a non-empty view. Do not skip any.
+- Each view: 40-70 words, alive and in that tradition's distinct voice (first person where natural). Keep them concise so all {n} fit.
 - Ground each view ONLY in that tradition's own passages above. After a specific teaching, tag its source exactly as labelled, e.g. [BG 2.47] or [Dhammapada 5]. Keep tags in Latin form.
 - NEVER invent verses or use another tradition's passages. If a tradition's passages don't speak to the question, let it answer briefly to the spirit of its teaching without fabricating.
 - Write every view in {language}.
 
-Respond with STRICT JSON only:
-{{"perspectives": [{{"key": "krishna", "view": "...", "used_refs": ["BG x.y"]}}, ... all {n} in order]}}"""
+Respond with STRICT JSON only (all {n} entries):
+{{"perspectives": [{{"key": "krishna", "view": "...", "used_refs": ["BG x.y"]}}, {{"key": "buddha", ...}}, {{"key": "shankara", ...}}, {{"key": "vivekananda", ...}}, {{"key": "modern", ...}}]}}"""
 
 
 def _extract_json(raw: str) -> dict | None:
@@ -73,7 +74,7 @@ def perspectives(question: str, language: str = "english", per_tradition_k: int 
     system = _SYSTEM.format(n=len(TRADITIONS), blocks="\n\n".join(blocks), language=lang_name(language))
     raw = chat(
         [{"role": "system", "content": system}, {"role": "user", "content": f"QUESTION: {question}"}],
-        temperature=0.45, max_tokens=1800,
+        temperature=0.45, max_tokens=2600,
     )
     parsed = _extract_json(raw) or {}
     by_key = {p.get("key"): p for p in parsed.get("perspectives", []) if isinstance(p, dict)}
