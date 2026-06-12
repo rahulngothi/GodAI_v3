@@ -51,8 +51,9 @@ def search(question: str, k: int = 5) -> list[dict]:
         results.append(
             {
                 "ref": d["ref"],
-                "chapter": d["chapter"],
-                "verse": d["verse"],
+                "source": d.get("source", "Bhagavad Gita"),
+                "chapter": d.get("chapter"),
+                "verse": d.get("verse"),
                 "sanskrit": d.get("sanskrit"),
                 "transliteration": d.get("transliteration"),
                 "translation": d["translation"],

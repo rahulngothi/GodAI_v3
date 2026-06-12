@@ -2,46 +2,61 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#b8410e" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0" />
+  <meta name="theme-color" content="#1a1230" />
   <title>Dharma AI — Wisdom of the Bhagavad Gita</title>
   <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="apple-touch-icon" href="/icons/icon-180.png" />
   <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
+  <div class="bg-aura"></div>
+  <div class="bg-mandala"></div>
+
   <div id="app">
     <header class="topbar">
       <div class="brand">
         <span class="om">ॐ</span>
         <div>
-          <h1>Dharma AI</h1>
-          <p class="tagline">Wisdom of the Bhagavad Gita</p>
+          <h1 class="title">Dharma AI</h1>
+          <p class="tagline">Timeless wisdom, in your words</p>
         </div>
       </div>
-      <button id="installBtn" class="install-btn" hidden>Install</button>
+      <div class="topbar-right">
+        <select id="language" class="lang-select" aria-label="Conversation language"></select>
+        <button id="installBtn" class="install-btn" hidden>Install</button>
+      </div>
     </header>
 
-    <nav id="personas" class="personas" aria-label="Choose a guide"></nav>
+    <div class="modebar" id="modebar">
+      <button class="mode-tab active" data-mode="converse">🪔 Ask a Guide</button>
+      <button class="mode-tab" data-mode="perspectives">☸ Many Views</button>
+      <button class="mode-tab" data-mode="daily">🌅 Today</button>
+    </div>
 
-    <main id="chat" class="chat">
+    <nav class="persona-rail" id="personas" aria-label="Choose your guide"></nav>
+
+    <main class="chat" id="chat">
       <div class="welcome" id="welcome">
         <div class="welcome-om">ॐ</div>
-        <h2>Ask anything. Receive wisdom, with its source.</h2>
-        <p>Every answer is grounded in the Bhagavad Gita and cites the exact verse — never invented.</p>
+        <h2>Sit with a guide.<br />Ask what weighs on your heart.</h2>
+        <p>Speak or type any question. Every answer is grounded in scripture — with the exact verse, never invented.</p>
         <div class="samples" id="samples">
-          <button>I am unhappy in my job. What would the Gita say?</button>
-          <button>How do I control my anger?</button>
-          <button>Why do I feel anxious about the future?</button>
-          <button>What is my real duty in life?</button>
+          <button class="sample">I feel lost in my career. What should I do?</button>
+          <button class="sample">How do I let go of anger?</button>
+          <button class="sample">Why do I fear the future so much?</button>
+          <button class="sample">What is my true purpose?</button>
         </div>
       </div>
     </main>
 
     <form id="composer" class="composer" autocomplete="off">
-      <button type="button" id="micBtn" class="icon-btn" title="Speak your question" aria-label="Voice input">🎙️</button>
-      <textarea id="input" rows="1" placeholder="Ask Dharma AI…" maxlength="2000"></textarea>
+      <button type="button" id="micBtn" class="icon-btn" title="Speak" aria-label="Voice input">🎙️</button>
+      <textarea id="input" rows="1" placeholder="Ask your guide…" maxlength="2000"></textarea>
       <button type="submit" id="sendBtn" class="icon-btn send" title="Send" aria-label="Send">➤</button>
     </form>
   </div>

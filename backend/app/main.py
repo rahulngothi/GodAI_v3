@@ -8,10 +8,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import ask as ask_module
+from . import daily as daily_module
+from . import perspectives as perspectives_module
 from .config import settings
 from .db import VERSES, get_db
+from .languages import LANGUAGES
 from .personas import PERSONAS
-from .schemas import AskRequest, AskResponse
+from .schemas import (
+    AskRequest,
+    AskResponse,
+    DailyResponse,
+    PerspectivesRequest,
+    PerspectivesResponse,
+)
 
 app = FastAPI(title="Dharma AI", version="1.0.0")
 
@@ -46,10 +55,34 @@ def list_personas():
     ]
 
 
+@app.get("/api/languages")
+def list_languages():
+    return [
+        {"key": k, "name": v["name"], "native": v["native"], "bcp47": v["bcp47"]}
+        for k, v in LANGUAGES.items()
+    ]
+
+
 @app.post("/api/ask", response_model=AskResponse)
 def ask_endpoint(req: AskRequest):
     try:
-        return ask_module.ask(req.question, persona_key=req.persona)
+        return ask_module.ask(req.question, persona_key=req.persona, language=req.language)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+@app.post("/api/perspectives", response_model=PerspectivesResponse)
+def perspectives_endpoint(req: PerspectivesRequest):
+    try:
+        return perspectives_module.perspectives(req.question, language=req.language)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
+
+
+@app.get("/api/daily", response_model=DailyResponse)
+def daily_endpoint(period: str | None = None, language: str = "english"):
+    try:
+        return daily_module.daily(period=period, language=language)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 

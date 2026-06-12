@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" fill="none" stroke="#f4d089" stroke-width="1">
+  <g transform="translate(200 200)">
+    <circle r="180"/><circle r="150"/><circle r="120"/><circle r="86"/><circle r="52"/><circle r="22"/>
+    <g>
+      <!-- 24 spokes -->
+      <g id="s"><line x1="0" y1="0" x2="0" y2="-180"/></g>
+      <use href="#s" transform="rotate(15)"/><use href="#s" transform="rotate(30)"/><use href="#s" transform="rotate(45)"/>
+      <use href="#s" transform="rotate(60)"/><use href="#s" transform="rotate(75)"/><use href="#s" transform="rotate(90)"/>
+      <use href="#s" transform="rotate(105)"/><use href="#s" transform="rotate(120)"/><use href="#s" transform="rotate(135)"/>
+      <use href="#s" transform="rotate(150)"/><use href="#s" transform="rotate(165)"/><use href="#s" transform="rotate(180)"/>
+      <use href="#s" transform="rotate(195)"/><use href="#s" transform="rotate(210)"/><use href="#s" transform="rotate(225)"/>
+      <use href="#s" transform="rotate(240)"/><use href="#s" transform="rotate(255)"/><use href="#s" transform="rotate(270)"/>
+      <use href="#s" transform="rotate(285)"/><use href="#s" transform="rotate(300)"/><use href="#s" transform="rotate(315)"/>
+      <use href="#s" transform="rotate(330)"/><use href="#s" transform="rotate(345)"/>
+    </g>
+    <g>
+      <!-- petal ring -->
+      <g id="p"><path d="M0,-86 Q24,-120 0,-150 Q-24,-120 0,-86 Z"/></g>
+      <use href="#p" transform="rotate(30)"/><use href="#p" transform="rotate(60)"/><use href="#p" transform="rotate(90)"/>
+      <use href="#p" transform="rotate(120)"/><use href="#p" transform="rotate(150)"/><use href="#p" transform="rotate(180)"/>
+      <use href="#p" transform="rotate(210)"/><use href="#p" transform="rotate(240)"/><use href="#p" transform="rotate(270)"/>
+      <use href="#p" transform="rotate(300)"/><use href="#p" transform="rotate(330)"/>
+    </g>
+  </g>
+</svg>
