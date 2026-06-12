@@ -36,5 +36,10 @@ class Settings(BaseSettings):
     # Auth (token signing). Override via JWT_SECRET in .env for production.
     jwt_secret: str = "dharma-dev-secret-change-me"
 
+    # Web Push (VAPID). Empty disables push features gracefully.
+    vapid_public_key: str = ""
+    vapid_private_key: str = ""
+    vapid_sub: str = "mailto:admin@example.com"
+
 
 settings = Settings()

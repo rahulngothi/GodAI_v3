@@ -1,5 +1,5 @@
 // Dharma AI service worker — network-first so updates always show; cache is offline fallback only.
-const CACHE = "dharma-ai-v6";
+const CACHE = "dharma-ai-v7";
 const SHELL = [
   "/",
   "/index.html",
@@ -19,6 +19,30 @@ self.addEventListener("activate", (e) => {
     caches.keys()
       .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
+  );
+});
+
+// ---- Daily Guidance push ----
+self.addEventListener("push", (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch (err) {}
+  e.waitUntil(
+    self.registration.showNotification(data.title || "Dharma AI", {
+      body: data.body || "Your verse of the day awaits. 🙏",
+      icon: "/icons/icon-192.png",
+      badge: "/icons/icon-192.png",
+      data: { url: (data && data.url) || "/" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      for (const c of list) { if ("focus" in c) return c.focus(); }
+      return clients.openWindow((e.notification.data && e.notification.data.url) || "/");
+    })
   );
 });
 

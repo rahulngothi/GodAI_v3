@@ -15,6 +15,7 @@ from fastapi import Depends
 from . import ask as ask_module
 from . import daily as daily_module
 from . import perspectives as perspectives_module
+from . import push as push_module
 from . import ratelimit
 from .auth import authenticate, create_token, get_current_user
 from .config import settings
@@ -36,6 +37,11 @@ from .schemas import (
 )
 
 app = FastAPI(title="Dharma AI", version="1.0.0")
+
+
+@app.on_event("startup")
+def _start_push_scheduler():
+    push_module.start_scheduler()
 
 app.add_middleware(
     CORSMiddleware,
@@ -228,6 +234,32 @@ def journal_delete(entry_id: str, user: str = Depends(get_current_user)):
         raise HTTPException(status_code=400, detail="Bad entry id")
     res = get_db()["journal"].delete_one({"_id": oid, "user": user})
     return {"deleted": res.deleted_count == 1}
+
+
+# ---- Web push (Daily Guidance notifications) ----
+@app.get("/api/push/vapid")
+def push_vapid():
+    return {"publicKey": settings.vapid_public_key, "enabled": push_module.enabled()}
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(sub: dict, user: str = Depends(get_current_user)):
+    if not sub.get("endpoint"):
+        raise HTTPException(status_code=400, detail="Bad subscription")
+    push_module.save_subscription(user, sub)
+    return {"subscribed": True}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(body: dict, user: str = Depends(get_current_user)):
+    removed = push_module.remove_subscription(user, body.get("endpoint", ""))
+    return {"unsubscribed": bool(removed)}
+
+
+@app.post("/api/push/test")
+def push_test(user: str = Depends(get_current_user)):
+    """Send the morning payload to all subscriptions now (for verification)."""
+    return push_module.send_to_all("morning")
 
 
 # Serve the web UI (mounted last so /api/* routes win).

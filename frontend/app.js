@@ -402,7 +402,10 @@ function renderDaily(data) {
         </div>
         <div class="journal-list" id="journalList"></div>
       </div>
-      <div class="actions"><button class="mini-btn listen">🔊 Listen</button></div>
+      <div class="actions">
+        <button class="mini-btn listen">🔊 Listen</button>
+        <button class="mini-btn" id="pushBell">🔔 Daily verse alerts</button>
+      </div>
       ${sourcesBlock([data.verse])}
     </div>`;
   chat.appendChild(wrap);
@@ -412,7 +415,53 @@ function renderDaily(data) {
     const txt = wrap.querySelector("#journalText").value.trim();
     if (txt) saveJournal(txt, data.journal_prompt, wrap.querySelector("#journalStatus"));
   };
+  initPushBell(wrap.querySelector("#pushBell"));
   scrollDown();
+}
+
+// ---- Daily Guidance push notifications ----
+function b64ToUint8(b64) {
+  const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+  const raw = atob((b64 + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+
+async function initPushBell(btn) {
+  if (!btn) return;
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) { btn.hidden = true; return; }
+  try {
+    const { publicKey, enabled } = await (await fetch(`${API}/api/push/vapid`)).json();
+    if (!enabled) { btn.hidden = true; return; }
+    const reg = await navigator.serviceWorker.ready;
+    const existing = await reg.pushManager.getSubscription();
+    const setLabel = (on) => { btn.textContent = on ? "🔕 Stop daily alerts" : "🔔 Daily verse alerts"; };
+    setLabel(!!existing);
+    btn.onclick = async () => {
+      try {
+        const cur = await reg.pushManager.getSubscription();
+        if (cur) {
+          await apiFetch("/api/push/unsubscribe", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ endpoint: cur.endpoint }),
+          });
+          await cur.unsubscribe();
+          setLabel(false);
+          return;
+        }
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") { btn.textContent = "🔕 Notifications blocked"; return; }
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: b64ToUint8(publicKey),
+        });
+        await apiFetch("/api/push/subscribe", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(sub.toJSON()),
+        });
+        setLabel(true);
+      } catch (e) { btn.textContent = "🔔 " + e.message; }
+    };
+  } catch (e) { btn.hidden = true; }
 }
 
 // ================= ask =================
