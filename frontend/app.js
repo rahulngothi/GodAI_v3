@@ -157,21 +157,34 @@ document.getElementById("modebar").addEventListener("click", (e) => {
 });
 document.getElementById("clearBtn").addEventListener("click", () => { clearChat(); if (currentMode === "daily") loadDaily(); });
 
-// ================= saved conversations =================
-async function openHistory() {
+// ================= conversations drawer (ChatGPT-style) =================
+const drawer = document.getElementById("drawer");
+const drawerBackdrop = document.getElementById("drawerBackdrop");
+const drawerList = document.getElementById("drawerList");
+
+function openDrawer() {
   if (!token) { showLogin(true); return; }
-  if (currentMode !== "converse") setMode("converse");
-  stopSpeaking();
-  chat.innerHTML = `<div class="hist-h">Past conversations</div><div class="hist-sub">tap one to continue where you left off</div>`;
+  drawer.classList.add("open");
+  drawerBackdrop.hidden = false;
+  renderDrawer();
+}
+function closeDrawer() {
+  drawer.classList.remove("open");
+  drawerBackdrop.hidden = true;
+}
+
+async function renderDrawer() {
+  drawerList.innerHTML = `<div class="drawer-empty">…</div>`;
   try {
     const chats = await apiFetch("/api/chats");
+    drawerList.innerHTML = "";
     if (!chats.length) {
-      chat.innerHTML += `<div class="hist-sub" style="margin-top:20px">No conversations yet — ask your first question. 🙏</div>`;
+      drawerList.innerHTML = `<div class="drawer-empty">No conversations yet.<br/>Ask your first question 🙏</div>`;
       return;
     }
     chats.forEach((c) => {
       const item = document.createElement("div");
-      item.className = "chat-item";
+      item.className = "chat-item" + (c.id === chatId ? " current" : "");
       item.innerHTML = `${faceHTML(c.persona)}<div class="chat-item-body">
           <div class="chat-item-title">${escapeHtml(c.title)}</div>
           <div class="chat-item-meta">${escapeHtml(personaName(c.persona))} · ${escapeHtml(c.updated)}</div>
@@ -179,18 +192,36 @@ async function openHistory() {
       item.querySelector(".chat-item-del").onclick = async (e) => {
         e.stopPropagation();
         await apiFetch(`/api/chats/${c.id}`, { method: "DELETE" });
+        if (c.id === chatId) { clearChat(); }
         item.remove();
       };
-      item.onclick = () => loadChat(c.id);
-      chat.appendChild(item);
+      item.onclick = () => { closeDrawer(); loadChat(c.id); };
+      drawerList.appendChild(item);
     });
   } catch (e) {
-    chat.innerHTML += `<div class="hist-sub">${escapeHtml(e.message)}</div>`;
+    drawerList.innerHTML = `<div class="drawer-empty">${escapeHtml(e.message)}</div>`;
   }
+}
+
+document.getElementById("histBtn").addEventListener("click", openDrawer);
+document.getElementById("drawerClose").addEventListener("click", closeDrawer);
+drawerBackdrop.addEventListener("click", closeDrawer);
+document.getElementById("newChatBtn").addEventListener("click", () => {
+  closeDrawer();
+  if (currentMode !== "converse") { setMode("converse"); } else { clearChat(); }
+});
+
+function forceConverseUI() {
+  currentMode = "converse";
+  document.querySelectorAll(".nav-tab").forEach((t) => t.classList.toggle("active", t.dataset.mode === "converse"));
+  personasNav.style.display = "flex";
+  composer.style.display = "flex";
+  input.placeholder = "Share what's on your mind…";
 }
 
 async function loadChat(id) {
   try {
+    forceConverseUI();
     const c = await apiFetch(`/api/chats/${id}`);
     chatId = c.id;
     currentPersona = c.persona || "guide";
@@ -217,7 +248,6 @@ async function loadChat(id) {
   }
 }
 
-document.getElementById("histBtn").addEventListener("click", openHistory);
 
 // ================= personas =================
 async function loadPersonas() {

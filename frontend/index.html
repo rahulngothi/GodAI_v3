@@ -55,15 +55,26 @@
     <button type="button" class="round-btn convo-mic" id="convoMic">🎙️</button>
   </div>
 
+  <!-- Conversations drawer (ChatGPT-style) -->
+  <div id="drawerBackdrop" class="drawer-backdrop" hidden></div>
+  <aside id="drawer" class="drawer" aria-label="Conversations">
+    <div class="drawer-head">
+      <span class="drawer-title">Conversations</span>
+      <button id="drawerClose" class="icon-chip" aria-label="Close">✕</button>
+    </div>
+    <button id="newChatBtn" class="newchat-btn">＋ &nbsp;New conversation</button>
+    <div id="drawerList" class="drawer-list"></div>
+  </aside>
+
   <div id="app">
     <header class="topbar">
+      <button id="histBtn" class="icon-chip" title="Conversations" aria-label="Conversations">☰</button>
       <div class="brand">
         <span class="om">ॐ</span>
         <h1 class="title">Dharma AI</h1>
       </div>
       <div class="topbar-right">
         <select id="language" class="lang-select" aria-label="Language"></select>
-        <button id="histBtn" class="icon-chip" title="Past conversations">🕘</button>
         <button id="clearBtn" class="icon-chip" title="New conversation">↺</button>
         <button id="logoutBtn" class="icon-chip" title="Sign out" hidden>⎋</button>
         <button id="installBtn" class="install-btn" hidden>Install</button>
