@@ -40,8 +40,14 @@ app = FastAPI(title="Dharma AI", version="1.0.0")
 
 
 @app.on_event("startup")
-def _start_push_scheduler():
+def _startup():
     push_module.start_scheduler()
+    # Ensure safety_flags has a time-series index for efficient admin queries.
+    try:
+        get_db()["safety_flags"].create_index([("ts", -1)])
+        get_db()["safety_flags"].create_index([("user", 1), ("ts", -1)])
+    except Exception:
+        pass
 
 app.add_middleware(
     CORSMiddleware,
@@ -140,6 +146,7 @@ def ask_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
             persona_key=req.persona,
             language=req.language,
             history=[t.model_dump() for t in req.history],
+            user=user,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
@@ -260,6 +267,21 @@ def push_unsubscribe(body: dict, user: str = Depends(get_current_user)):
 def push_test(user: str = Depends(get_current_user)):
     """Send the morning payload to all subscriptions now (for verification)."""
     return push_module.send_to_all("morning")
+
+
+# ---- Safety flags (admin review, auth-gated) ----
+@app.get("/api/admin/safety-flags")
+def safety_flags_list(limit: int = 100, user: str = Depends(get_current_user)):
+    docs = (
+        get_db()["safety_flags"]
+        .find({}, {"_id": 0})
+        .sort("ts", -1)
+        .limit(min(limit, 500))
+    )
+    return [
+        {"user": d["user"], "categories": d["categories"], "ts": d["ts"].isoformat()}
+        for d in docs
+    ]
 
 
 # Serve the web UI (mounted last so /api/* routes win).

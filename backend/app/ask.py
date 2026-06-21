@@ -15,6 +15,15 @@ from .languages import lang_name
 from .nvidia import chat
 from .personas import get_persona
 from .retrieval import search
+from .safety import (
+    ScreenResult,
+    _crisis_reply,
+    _scope_reply,
+    _STRICT_ADDENDUM,
+    log_flag,
+    screen_input,
+    screen_output,
+)
 
 SYSTEM_TEMPLATE = """You ARE {persona_name}. A person has come to sit with you, and you are in a real, unhurried conversation with them — not an audience, not a Q&A. You speak as you truly would, in this living moment.
 
@@ -71,22 +80,74 @@ def _extract_json(raw: str) -> dict | None:
     return None
 
 
+def _run_llm(messages: list[dict], system_extra: str = "") -> tuple[str, list, list]:
+    """Call the LLM and parse the JSON envelope. Returns (answer, used_refs, followups)."""
+    if system_extra and messages and messages[0]["role"] == "system":
+        messages = [{"role": "system", "content": messages[0]["content"] + system_extra}] + messages[1:]
+    raw = chat(messages, temperature=0.75, max_tokens=900)
+    parsed = _extract_json(raw)
+    if parsed:
+        answer = (parsed.get("answer") or "").strip()
+        answer = re.sub(r"\*[^*\n]{1,60}\*", "", answer)
+        answer = answer.replace("*", "")
+        answer = re.sub(r"[ \t]{2,}", " ", answer).strip()
+        used_refs = parsed.get("used_refs") or []
+        followups = [f for f in (parsed.get("followups") or []) if f][:3]
+    else:
+        answer = raw.strip()
+        used_refs = re.findall(r"BG\s*\d+\.\d+", answer)
+        followups = []
+    return answer, used_refs, followups
+
+
 def ask(
     question: str,
     persona_key: str = "guide",
     language: str = "english",
     history: list[dict] | None = None,
     k: int = 5,
+    user: str = "anonymous",
 ) -> dict:
+    # ------------------------------------------------------------------
+    # Safety: input screening (injection scrub + keyword + LLM classify)
+    # ------------------------------------------------------------------
+    sr: ScreenResult = screen_input(question)
+    # Use the injection-scrubbed text for the model; original for display
+    safe_question = sr.clean_text if sr.clean_text else question
+
+    if sr.flagged:
+        log_flag(user, sr.categories)
+
+    if sr.is_crisis:
+        return {
+            "answer": _crisis_reply(persona_key),
+            "citations": [],
+            "followups": [],
+            "persona": persona_key,
+            "persona_name": get_persona(persona_key)["name"],
+        }
+
+    if sr.scope:
+        return {
+            "answer": _scope_reply(persona_key, sr.scope),
+            "citations": [],
+            "followups": [],
+            "persona": persona_key,
+            "persona_name": get_persona(persona_key)["name"],
+        }
+
+    # ------------------------------------------------------------------
+    # Normal RAG flow
+    # ------------------------------------------------------------------
     persona = get_persona(persona_key)
-    verses = search(question, k=k)
+    verses = search(safe_question, k=k)
 
     system = SYSTEM_TEMPLATE.format(
         persona_name=persona["name"], style=persona["style"], language=lang_name(language)
     )
 
     messages: list[dict] = [{"role": "system", "content": system}]
-    # Carry the recent conversation so it flows like a real dialogue.
+    # Carry recent conversation so it flows like real dialogue.
     for turn in (history or [])[-6:]:
         role = "assistant" if turn.get("role") == "assistant" else "user"
         content = (turn.get("content") or "").strip()
@@ -96,29 +157,25 @@ def ask(
         "role": "user",
         "content": (
             f"(verses you may quietly draw on — translation by Shri Purohit Swami / F. Max Müller:\n"
-            f"{_build_context(verses)})\n\n{question}"
+            f"{_build_context(verses)})\n\n{safe_question}"
         ),
     })
 
-    raw = chat(messages, temperature=0.75, max_tokens=900)
+    answer, used_refs, followups = _run_llm(messages)
 
-    parsed = _extract_json(raw)
-    if parsed:
-        answer = (parsed.get("answer") or "").strip()
-        answer = re.sub(r"\*[^*\n]{1,60}\*", "", answer)              # short stage directions: drop
-        answer = answer.replace("*", "")                                # any remaining asterisk markup: unwrap
-        answer = re.sub(r"[ \t]{2,}", " ", answer).strip()
-        used_refs = parsed.get("used_refs") or []
-        followups = [f for f in (parsed.get("followups") or []) if f][:3]
-    else:
-        # Graceful fallback: use the raw text as the answer.
-        answer = raw.strip()
-        used_refs = re.findall(r"BG\s*\d+\.\d+", answer)
-        followups = []
+    # ------------------------------------------------------------------
+    # Safety: output moderation
+    # ------------------------------------------------------------------
+    def _regenerate() -> str:
+        ans, _, _ = _run_llm(messages, system_extra=_STRICT_ADDENDUM)
+        return ans
 
+    answer = screen_output(answer, regenerate_fn=_regenerate, persona_key=persona_key)
+
+    # ------------------------------------------------------------------
+    # Build citation cards
+    # ------------------------------------------------------------------
     used = {r.replace(" ", "") for r in used_refs}
-
-    # used == empty means a purely conversational turn: no source cards shown.
     citations = [{**v, "used": v["ref"].replace(" ", "") in used} for v in verses]
     citations.sort(key=lambda c: (not c["used"], -c["score"]))
 
