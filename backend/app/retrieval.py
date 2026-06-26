@@ -36,8 +36,18 @@ def reset_cache() -> None:
     _matrix, _docs = None, None
 
 
-def search(question: str, k: int = 5, sources: list[str] | None = None) -> list[dict]:
-    """Top-k semantically similar passages. If `sources` is given, restrict to those texts."""
+def search(
+    question: str,
+    k: int = 5,
+    sources: list[str] | None = None,
+    min_score: float = 0.0,
+) -> list[dict]:
+    """
+    Top-k semantically similar passages above min_score.
+
+    Verses below min_score are dropped entirely — a missing citation is better
+    than a weakly-related one.  If sources is given, restrict to those texts.
+    """
     _load()
     assert _matrix is not None and _docs is not None
     q = np.asarray(embed_one(question, input_type="query"), dtype=np.float32)
@@ -48,6 +58,9 @@ def search(question: str, k: int = 5, sources: list[str] | None = None) -> list[
     order = np.argsort(-sims)
     results = []
     for i in order:
+        score = float(sims[int(i)])
+        if score < min_score:
+            break  # sorted descending — once below threshold, all remaining are too
         d = _docs[int(i)]
         src = d.get("source", "Bhagavad Gita")
         if sources is not None and src not in sources:
@@ -63,7 +76,7 @@ def search(question: str, k: int = 5, sources: list[str] | None = None) -> list[
                 "translation": d["translation"],
                 "translator": d["translator"],
                 "layer": d.get("layer", "scripture"),
-                "score": round(float(sims[int(i)]), 4),
+                "score": round(score, 4),
             }
         )
         if len(results) >= k:
