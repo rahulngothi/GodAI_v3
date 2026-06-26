@@ -20,7 +20,8 @@ from . import push as push_module
 from . import ratelimit
 from .auth import authenticate, create_token, get_current_user
 from .config import settings
-from .db import VERSES, get_db, ensure_reflective_indexes
+from .db import VERSES, REFLECTIVE_QUESTIONS, USER_PROFILES, get_db, ensure_reflective_indexes
+from .engagement import ENGAGEMENT_SCORES
 from .languages import LANGUAGES
 from .personas import PERSONAS
 from .schemas import (
@@ -330,6 +331,169 @@ def safety_flags_list(limit: int = 100, user: str = Depends(get_current_user)):
         {"user": d["user"], "categories": d["categories"], "ts": d["ts"].isoformat()}
         for d in docs
     ]
+
+
+# ── Reflective Question Engine — admin endpoints ───────────────────────────
+
+@app.get("/api/admin/rqe/coverage")
+def rqe_coverage(user: str = Depends(get_current_user)):
+    """Coverage matrix: questions per (theme, type, depth) cell."""
+    from .themes import THEMES_LIST
+    TYPES = ["self_awareness", "action_oriented", "spiritual"]
+    DEPTHS = [1, 2, 3]
+    coll = get_db()[REFLECTIVE_QUESTIONS]
+    report = {}
+    total_q = 0
+    for theme in THEMES_LIST:
+        for qtype in TYPES:
+            for depth in DEPTHS:
+                count = coll.count_documents({
+                    "themes": theme, "type": qtype, "depth": depth,
+                    "status": {"$in": ["approved", "draft"]}, "active": True,
+                })
+                key = f"{theme}/{qtype}/depth{depth}"
+                report[key] = count
+                total_q += count
+    target = settings.rqe_target_per_cell
+    filled = sum(1 for v in report.values() if v >= target)
+    partial = sum(1 for v in report.values() if 0 < v < target)
+    empty = sum(1 for v in report.values() if v == 0)
+    return {
+        "total_questions": total_q,
+        "cells": {"total": len(report), "filled": filled, "partial": partial, "empty": empty},
+        "matrix": report,
+        "target_per_cell": target,
+    }
+
+
+@app.get("/api/admin/rqe/analytics")
+def rqe_analytics(user: str = Depends(get_current_user)):
+    """Engagement rates by theme, type, depth — and top/bottom questions."""
+    coll = get_db()[REFLECTIVE_QUESTIONS]
+    pipeline_by_theme = [
+        {"$match": {"active": True, "stats.shown_count": {"$gt": 0}}},
+        {"$unwind": "$themes"},
+        {"$group": {
+            "_id": "$themes",
+            "shown": {"$sum": "$stats.shown_count"},
+            "answered": {"$sum": "$stats.answered_count"},
+            "questions": {"$sum": 1},
+        }},
+        {"$addFields": {"engagement_rate": {
+            "$cond": [{"$gt": ["$shown", 0]},
+                      {"$divide": ["$answered", "$shown"]}, 0]
+        }}},
+        {"$sort": {"engagement_rate": -1}},
+    ]
+    pipeline_by_type = [
+        {"$match": {"active": True, "stats.shown_count": {"$gt": 0}}},
+        {"$group": {
+            "_id": {"type": "$type", "depth": "$depth"},
+            "shown": {"$sum": "$stats.shown_count"},
+            "answered": {"$sum": "$stats.answered_count"},
+            "questions": {"$sum": 1},
+        }},
+        {"$addFields": {"engagement_rate": {
+            "$cond": [{"$gt": ["$shown", 0]},
+                      {"$divide": ["$answered", "$shown"]}, 0]
+        }}},
+        {"$sort": {"_id.type": 1, "_id.depth": 1}},
+    ]
+
+    def _fmt_q(doc):
+        return {
+            "id": str(doc["_id"]),
+            "en": (doc.get("text") or {}).get("en", "")[:120],
+            "themes": doc.get("themes", []),
+            "type": doc.get("type"),
+            "depth": doc.get("depth"),
+            "shown": doc["stats"]["shown_count"],
+            "rate": round(doc["stats"]["engagement_rate"], 3),
+        }
+
+    top_q = list(coll.find(
+        {"active": True, "stats.shown_count": {"$gte": 5}},
+        sort=[("stats.engagement_rate", -1)], limit=10
+    ))
+    bottom_q = list(coll.find(
+        {"active": True, "stats.shown_count": {"$gte": 5}},
+        sort=[("stats.engagement_rate", 1)], limit=10
+    ))
+    needs_review = coll.count_documents({"status": "needs_review"})
+    runtime_captured = coll.count_documents({"source": "runtime_captured"})
+
+    return {
+        "by_theme": list(coll.aggregate(pipeline_by_theme)),
+        "by_type_depth": list(coll.aggregate(pipeline_by_type)),
+        "top_questions": [_fmt_q(d) for d in top_q],
+        "bottom_questions": [_fmt_q(d) for d in bottom_q],
+        "needs_review_count": needs_review,
+        "runtime_captured_count": runtime_captured,
+    }
+
+
+@app.get("/api/admin/rqe/questions")
+def rqe_questions_list(
+    status: str = "needs_review",
+    limit: int = 50,
+    user: str = Depends(get_current_user),
+):
+    """List questions by status for review."""
+    statuses = [s.strip() for s in status.split(",") if s.strip()]
+    docs = (
+        get_db()[REFLECTIVE_QUESTIONS]
+        .find({"status": {"$in": statuses}})
+        .sort("created_at", -1)
+        .limit(min(limit, 200))
+    )
+    return [
+        {
+            "id": str(d["_id"]),
+            "en": (d.get("text") or {}).get("en", ""),
+            "hi": (d.get("text") or {}).get("hi"),
+            "hinglish": (d.get("text") or {}).get("hinglish"),
+            "themes": d.get("themes", []),
+            "type": d.get("type"),
+            "depth": d.get("depth"),
+            "status": d.get("status"),
+            "source": d.get("source"),
+            "active": d.get("active", True),
+            "stats": d.get("stats", {}),
+        }
+        for d in docs
+    ]
+
+
+@app.patch("/api/admin/rqe/questions/{question_id}")
+def rqe_question_update(
+    question_id: str,
+    body: dict,
+    user: str = Depends(get_current_user),
+):
+    """Approve, reject, or deactivate a single question."""
+    import datetime as _dt2
+    try:
+        oid = ObjectId(question_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Bad question id")
+
+    allowed_fields = {"status", "active", "text", "themes", "depth", "type", "emotions", "concepts"}
+    update = {k: v for k, v in body.items() if k in allowed_fields}
+    if not update:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    update["updated_at"] = _dt2.datetime.now(_dt2.timezone.utc)
+    res = get_db()[REFLECTIVE_QUESTIONS].update_one({"_id": oid}, {"$set": update, "$inc": {"version": 1}})
+    return {"matched": res.matched_count, "modified": res.modified_count}
+
+
+@app.get("/api/admin/rqe/user-prefs/{username}")
+def rqe_user_prefs(username: str, user: str = Depends(get_current_user)):
+    """Inspect a user's reflective preferences."""
+    doc = get_db()[USER_PROFILES].find_one({"_id": username})
+    if not doc:
+        return {"user": username, "reflective_prefs": None}
+    return {"user": username, "reflective_prefs": doc.get("reflective_prefs", {})}
 
 
 # Serve the web UI (mounted last so /api/* routes win).
