@@ -236,7 +236,7 @@ def keyword_flag(text: str) -> set[str]:
 # ---------------------------------------------------------------------------
 _CLASSIFY_SYSTEM = (
     'Classify the message below. Reply ONLY with valid JSON and nothing else.\n'
-    '{"crisis": true_or_false, "scope": null_or_"medical"_or_"legal"_or_"financial"}\n\n'
+    '{{"crisis": true_or_false, "scope": null_or_"medical"_or_"legal"_or_"financial"}}\n\n'
     'crisis = true if the person expresses suicidal ideation, intent to self-harm, '
     'or describes abuse or a situation where they may be in immediate danger.\n'
     'scope = the category if the person is seeking professional medical, legal, or financial advice '
