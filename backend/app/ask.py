@@ -18,6 +18,7 @@ import re
 from typing import Callable, Iterator
 
 from .config import settings
+from .engagement import process_engagement
 from .lang_detect import resolve_language, verify_language
 from .nvidia import chat, chat_stream
 from .personas import get_persona
@@ -268,6 +269,38 @@ def _strip_hallucinated_citations(answer: str, verses: list[dict]) -> str:
     return re.sub(r"\[(BG\s*\d+\.\d+)\]", _keep_if_valid, answer).strip()
 
 
+def _get_prior_reflective_meta(history: list[dict]) -> dict | None:
+    """Return the reflective metadata from the most recent assistant turn."""
+    for turn in reversed(history or []):
+        if turn.get("role") == "assistant" and turn.get("reflective", {}).get("shown"):
+            return turn["reflective"]
+    return None
+
+
+def _fire_engagement(
+    sr: "ScreenResult",
+    history: list[dict],
+    user: str,
+    lang_key: str,
+) -> None:
+    """Trigger async engagement update if we have a signal and a prior question."""
+    if not sr.engaged_prior:
+        return
+    prior_meta = _get_prior_reflective_meta(history)
+    if not prior_meta:
+        return
+    process_engagement(
+        user_id=user,
+        question_id=prior_meta.get("question_id"),
+        engagement_level=sr.engaged_prior,
+        on_the_fly=prior_meta.get("on_the_fly", False),
+        surface_text=prior_meta.get("surface_text"),
+        primary_theme=prior_meta.get("primary_theme"),
+        depth=prior_meta.get("depth", 1),
+        lang_key=lang_key,
+    )
+
+
 def _extract_closing_question(answer: str) -> str | None:
     """Extract the last sentence ending in '?' from the answer."""
     sentences = re.split(r'(?<=[.!?])\s+', answer.strip())
@@ -405,6 +438,9 @@ def ask(
                 user, rfl_meta["question_id"],
                 rfl_meta["depth"], _get_user_prefs_safe(user),
             )
+
+    # Fire async engagement update for the prior question (non-blocking)
+    _fire_engagement(sr, history or [], user, lang_key)
 
     return {
         "answer": answer,
@@ -590,6 +626,9 @@ def ask_stream(
                 user, rfl_meta["question_id"],
                 rfl_meta["depth"], _get_user_prefs_safe(user),
             )
+
+    # Fire async engagement update for the prior question (non-blocking)
+    _fire_engagement(sr, history or [], user, lang_key)
 
     result = {
         "answer": answer,
