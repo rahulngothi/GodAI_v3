@@ -236,36 +236,40 @@ def keyword_flag(text: str) -> set[str]:
 # ---------------------------------------------------------------------------
 _CLASSIFY_SYSTEM = (
     'Classify the message below. Reply ONLY with valid JSON and nothing else.\n'
-    '{{"crisis": true_or_false, "scope": null_or_"medical"_or_"legal"_or_"financial"}}\n\n'
+    '{{"crisis": true_or_false, "scope": null_or_"medical"_or_"legal"_or_"financial", '
+    '"themes": "comma-separated Gita spiritual themes, e.g. duty,inertia,attachment"}}\n\n'
     'crisis = true if the person expresses suicidal ideation, intent to self-harm, '
     'or describes abuse or a situation where they may be in immediate danger.\n'
     'scope = the category if the person is seeking professional medical, legal, or financial advice '
-    '(not general wellbeing questions). null otherwise.\n\n'
+    '(not general wellbeing questions). null otherwise.\n'
+    'themes = 3-5 core Gita-relevant spiritual themes or life situations for the message '
+    '(e.g. duty, inertia, motivation, attachment to outcome, equanimity, self-doubt). '
+    'Always include themes; use "general spiritual inquiry" if nothing specific applies.\n\n'
     'Message: "{text}"'
 )
 
 
 def llm_classify(text: str) -> dict:
-    """Returns {crisis: bool, scope: str|None}. Never raises — falls back to safe defaults."""
+    """Returns {crisis: bool, scope: str|None, themes: str}. Never raises."""
     prompt = _CLASSIFY_SYSTEM.format(text=text.replace('"', "'")[:800])
     try:
         raw = chat(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=40,
+            max_tokens=60,
         )
         raw = raw.strip()
-        # Extract JSON defensively
         s, e = raw.find("{"), raw.rfind("}")
         if s != -1 and e > s:
             parsed = json.loads(raw[s:e+1])
             return {
                 "crisis": bool(parsed.get("crisis", False)),
                 "scope": parsed.get("scope") or None,
+                "themes": (parsed.get("themes") or "").strip(),
             }
     except Exception as exc:
         log.warning("llm_classify failed: %s", exc)
-    return {"crisis": False, "scope": None}
+    return {"crisis": False, "scope": None, "themes": ""}
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +281,7 @@ class ScreenResult:
     categories: set[str] = field(default_factory=set)
     is_crisis: bool = False
     scope: str | None = None         # "medical" | "legal" | "financial" | None
+    themes: str = ""                 # Gita spiritual themes for retrieval expansion
 
     @property
     def flagged(self) -> bool:
@@ -284,28 +289,24 @@ class ScreenResult:
 
 
 def screen_input(text: str) -> ScreenResult:
-    """Full input safety check. Returns ScreenResult."""
+    """Full input safety check. Returns ScreenResult (now also carries themes)."""
     clean = scrub_injection(text)
 
-    # If injection stripping ate almost everything, treat as empty
     if len(clean.replace(" ", "")) < 3:
         return ScreenResult(clean_text=clean)
 
     kw_cats = keyword_flag(clean)
     needs_llm = bool(kw_cats) or len(clean) > 40
 
-    llm_result: dict = {"crisis": False, "scope": None}
+    llm_result: dict = {"crisis": False, "scope": None, "themes": ""}
     if needs_llm:
         llm_result = llm_classify(clean)
 
-    # Crisis fires on keyword OR llm confirmation
     is_crisis = ("crisis" in kw_cats) or llm_result["crisis"]
 
-    # Scope fires only if BOTH keyword AND llm agree (reduces false positives)
     llm_scope = llm_result.get("scope")
     scope_cats = kw_cats & {"medical", "legal", "financial"}
     scope = llm_scope if (llm_scope and llm_scope in scope_cats) else None
-    # If no keyword match but llm is highly confident (direct explicit request), trust it
     if scope is None and llm_scope in {"medical", "legal", "financial"} and not kw_cats:
         scope = llm_scope
 
@@ -318,6 +319,7 @@ def screen_input(text: str) -> ScreenResult:
         categories=categories,
         is_crisis=is_crisis,
         scope=scope,
+        themes=llm_result.get("themes", ""),
     )
 
 
@@ -344,7 +346,16 @@ def _is_output_safe(answer: str) -> bool:
             temperature=0.0,
             max_tokens=10,
         )
-        return verdict.strip().lower().startswith("safe")
+        result = verdict.strip().lower()
+        # Model sometimes returns verbose reasoning instead of a single word.
+        # Check for "unsafe" first (explicit fail), then "safe" anywhere (pass),
+        # then fail-open so transient non-answers don't silence every reply.
+        if "unsafe" in result:
+            return False
+        if "safe" in result:
+            return True
+        log.debug("output moderation returned ambiguous verdict: %r", result[:80])
+        return True  # fail open
     except Exception as exc:
         log.warning("output moderation call failed: %s", exc)
         return True  # fail open rather than block every reply on transient errors
