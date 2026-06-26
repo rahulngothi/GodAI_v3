@@ -20,7 +20,7 @@ from . import push as push_module
 from . import ratelimit
 from .auth import authenticate, create_token, get_current_user
 from .config import settings
-from .db import VERSES, get_db
+from .db import VERSES, get_db, ensure_reflective_indexes
 from .languages import LANGUAGES
 from .personas import PERSONAS
 from .schemas import (
@@ -43,10 +43,13 @@ app = FastAPI(title="Dharma AI", version="1.0.0")
 @app.on_event("startup")
 def _startup():
     push_module.start_scheduler()
-    # Ensure safety_flags has a time-series index for efficient admin queries.
     try:
         get_db()["safety_flags"].create_index([("ts", -1)])
         get_db()["safety_flags"].create_index([("user", 1), ("ts", -1)])
+    except Exception:
+        pass
+    try:
+        ensure_reflective_indexes()
     except Exception:
         pass
 
@@ -112,8 +115,14 @@ def _save_turns(user: str, chat_id: str | None, req: AskRequest, result: dict) -
         "followups": result["followups"],
         "persona": result["persona"],
         "persona_name": result["persona_name"],
+        "reflective": result.get("reflective"),  # reflective question metadata
     }
-    user_turn = {"role": "user", "content": req.question}
+    # Store engagement signal on the user turn (for the prior question)
+    user_turn = {
+        "role": "user",
+        "content": req.question,
+        "engaged_prior_question": result.get("engaged_prior"),
+    }
     if chat_id:
         try:
             oid = ObjectId(chat_id)

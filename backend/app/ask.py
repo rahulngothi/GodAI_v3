@@ -21,6 +21,16 @@ from .config import settings
 from .lang_detect import resolve_language, verify_language
 from .nvidia import chat, chat_stream
 from .personas import get_persona
+from .themes import normalize_themes
+from .reflective import (
+    build_continue_thread_instruction,
+    build_seed_instruction,
+    build_skip_instruction,
+    get_prior_question_for_classification,
+    record_question_shown,
+    select_reflective_seed,
+    should_skip_question,
+)
 from .retrieval import search
 from .safety import (
     ScreenResult,
@@ -258,6 +268,24 @@ def _strip_hallucinated_citations(answer: str, verses: list[dict]) -> str:
     return re.sub(r"\[(BG\s*\d+\.\d+)\]", _keep_if_valid, answer).strip()
 
 
+def _extract_closing_question(answer: str) -> str | None:
+    """Extract the last sentence ending in '?' from the answer."""
+    sentences = re.split(r'(?<=[.!?])\s+', answer.strip())
+    for sentence in reversed(sentences):
+        if sentence.strip().endswith("?"):
+            return sentence.strip()
+    return None
+
+
+def _get_user_prefs_safe(user_id: str) -> dict:
+    """Fetch user reflective prefs without raising."""
+    try:
+        from .reflective import _get_user_prefs
+        return _get_user_prefs(user_id)
+    except Exception:
+        return {}
+
+
 def _build_citations(verses: list[dict], used_refs: list[str]) -> list[dict]:
     used = {r.replace(" ", "") for r in used_refs}
     citations = [{**v, "used": v["ref"].replace(" ", "") in used} for v in verses]
@@ -276,7 +304,8 @@ def ask(
     k: int = 5,
     user: str = "anonymous",
 ) -> dict:
-    sr: ScreenResult = screen_input(question)
+    prior_q = get_prior_question_for_classification(history or [])
+    sr: ScreenResult = screen_input(question, prior_question=prior_q)
     safe_question = sr.clean_text if sr.clean_text else question
 
     if sr.flagged:
@@ -291,6 +320,7 @@ def ask(
             "followups": [],
             "persona": persona_key,
             "persona_name": persona["name"],
+            "reflective": None,
         }
 
     if sr.scope:
@@ -300,6 +330,7 @@ def ask(
             "followups": [],
             "persona": persona_key,
             "persona_name": persona["name"],
+            "reflective": None,
         }
 
     lang_key, lang_display = resolve_language(safe_question, language)
@@ -308,9 +339,43 @@ def ask(
     retrieval_query = f"{sr.themes} — {safe_question}" if sr.themes else safe_question
     verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
 
-    system = _build_system(
-        persona["name"], persona["style"], lang_key, lang_display, streaming=False
-    )
+    # ── Reflective question engine ─────────────────────────────────────────
+    turn_count = sum(1 for t in (history or []) if t.get("role") == "assistant")
+    skip, skip_reason = should_skip_question(sr, history or [], user, turn_count)
+
+    rfl_meta: dict | None = None
+    system = _build_system(persona["name"], persona["style"], lang_key, lang_display, streaming=False)
+
+    if skip:
+        if skip_reason == "continuing_prior_thread" and prior_q:
+            system += build_continue_thread_instruction(prior_q, lang_display)
+        else:
+            system += build_skip_instruction()
+    else:
+        seed, on_the_fly = select_reflective_seed(sr, history or [], user, turn_count, lang_key)
+        if seed and not on_the_fly:
+            system += build_seed_instruction(seed, lang_display)
+            rfl_meta = {
+                "question_id": str(seed["_id"]),
+                "shown": True,
+                "depth": seed.get("depth", 1),
+                "primary_theme": (seed.get("themes") or [""])[0],
+                "seed_text": (seed.get("text") or {}).get("en", ""),
+                "on_the_fly": False,
+            }
+        elif on_the_fly:
+            rfl_meta = {
+                "question_id": None,
+                "shown": True,
+                "depth": 1,
+                "primary_theme": (normalize_themes(sr.themes) or ["restlessness"])[0],
+                "seed_text": None,
+                "on_the_fly": True,
+            }
+        else:
+            system += build_skip_instruction()
+    # ──────────────────────────────────────────────────────────────────────
+
     messages = _build_messages(system, history, verses, safe_question, lang_display)
 
     answer, used_refs, followups = _run_llm(messages)
@@ -332,12 +397,23 @@ def ask(
     answer = screen_output(answer, regenerate_fn=_regenerate, persona_key=persona_key)
     answer = _strip_hallucinated_citations(answer, verses)
 
+    # Capture surface_text for the reflective metadata
+    if rfl_meta and rfl_meta.get("shown"):
+        rfl_meta["surface_text"] = _extract_closing_question(answer)
+        if rfl_meta["question_id"]:
+            record_question_shown(
+                user, rfl_meta["question_id"],
+                rfl_meta["depth"], _get_user_prefs_safe(user),
+            )
+
     return {
         "answer": answer,
         "citations": _build_citations(verses, used_refs),
         "followups": followups,
         "persona": persona_key,
         "persona_name": persona["name"],
+        "reflective": rfl_meta,
+        "engaged_prior": sr.engaged_prior,
     }
 
 
@@ -367,7 +443,8 @@ def ask_stream(
     def _sse(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
-    sr: ScreenResult = screen_input(question)
+    prior_q = get_prior_question_for_classification(history or [])
+    sr: ScreenResult = screen_input(question, prior_question=prior_q)
     safe_question = sr.clean_text if sr.clean_text else question
 
     if sr.flagged:
@@ -382,6 +459,7 @@ def ask_stream(
             "followups": [],
             "persona": persona_key,
             "persona_name": persona["name"],
+            "reflective": None,
         }
         chat_id = on_done(result) if on_done else None
         yield _sse({"done": True, "chat_id": chat_id, **result})
@@ -394,6 +472,7 @@ def ask_stream(
             "followups": [],
             "persona": persona_key,
             "persona_name": persona["name"],
+            "reflective": None,
         }
         chat_id = on_done(result) if on_done else None
         yield _sse({"done": True, "chat_id": chat_id, **result})
@@ -405,9 +484,43 @@ def ask_stream(
     retrieval_query = f"{sr.themes} — {safe_question}" if sr.themes else safe_question
     verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
 
-    system = _build_system(
-        persona["name"], persona["style"], lang_key, lang_display, streaming=True
-    )
+    # ── Reflective question engine ─────────────────────────────────────────
+    turn_count = sum(1 for t in (history or []) if t.get("role") == "assistant")
+    skip, skip_reason = should_skip_question(sr, history or [], user, turn_count)
+
+    rfl_meta: dict | None = None
+    system = _build_system(persona["name"], persona["style"], lang_key, lang_display, streaming=True)
+
+    if skip:
+        if skip_reason == "continuing_prior_thread" and prior_q:
+            system += build_continue_thread_instruction(prior_q, lang_display)
+        else:
+            system += build_skip_instruction()
+    else:
+        seed, on_the_fly = select_reflective_seed(sr, history or [], user, turn_count, lang_key)
+        if seed and not on_the_fly:
+            system += build_seed_instruction(seed, lang_display)
+            rfl_meta = {
+                "question_id": str(seed["_id"]),
+                "shown": True,
+                "depth": seed.get("depth", 1),
+                "primary_theme": (seed.get("themes") or [""])[0],
+                "seed_text": (seed.get("text") or {}).get("en", ""),
+                "on_the_fly": False,
+            }
+        elif on_the_fly:
+            rfl_meta = {
+                "question_id": None,
+                "shown": True,
+                "depth": 1,
+                "primary_theme": (normalize_themes(sr.themes) or ["restlessness"])[0],
+                "seed_text": None,
+                "on_the_fly": True,
+            }
+        else:
+            system += build_skip_instruction()
+    # ──────────────────────────────────────────────────────────────────────
+
     messages = _build_messages(system, history, verses, safe_question, lang_display)
 
     full_text = ""
@@ -468,12 +581,24 @@ def ask_stream(
         yield _sse({"replaced": "let me say that again…", "answer": answer})
 
     citations = _build_citations(verses, used_refs)
+
+    # Capture surface_text and record the question shown
+    if rfl_meta and rfl_meta.get("shown"):
+        rfl_meta["surface_text"] = _extract_closing_question(answer)
+        if rfl_meta.get("question_id"):
+            record_question_shown(
+                user, rfl_meta["question_id"],
+                rfl_meta["depth"], _get_user_prefs_safe(user),
+            )
+
     result = {
         "answer": answer,
         "citations": citations,
         "followups": [],
         "persona": persona_key,
         "persona_name": persona["name"],
+        "reflective": rfl_meta,
+        "engaged_prior": sr.engaged_prior,
     }
     chat_id = on_done(result) if on_done else None
     yield _sse({"done": True, "chat_id": chat_id, **result})
