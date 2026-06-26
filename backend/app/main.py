@@ -1,25 +1,23 @@
 """Dharma AI FastAPI app — one backend that serves web + (future) mobile clients."""
 from __future__ import annotations
 
+import datetime as _dt
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from bson import ObjectId
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-import datetime as _dt
-
-from bson import ObjectId
-from fastapi import Depends
-
 from . import ask as ask_module
 from . import daily as daily_module
+from . import memory as memory_module
 from . import perspectives as perspectives_module
 from . import push as push_module
 from . import ratelimit
-from .auth import authenticate, create_token, get_current_user
+from .auth import authenticate, create_token, get_current_user, signup
 from .config import settings
-from .db import VERSES, get_db
+from .db import VERSES, ensure_indexes, get_db
 from .languages import LANGUAGES
 from .personas import PERSONAS
 from .schemas import (
@@ -34,29 +32,38 @@ from .schemas import (
     LoginResponse,
     PerspectivesRequest,
     PerspectivesResponse,
+    SignupRequest,
+    UserProfile,
+    UserProfileUpdate,
 )
 
 app = FastAPI(title="Dharma AI", version="1.0.0")
 
 
 @app.on_event("startup")
-def _start_push_scheduler():
+def _startup():
+    ensure_indexes()
     push_module.start_scheduler()
 
+
+# CORS — locked to configured origins (set ALLOWED_ORIGINS in .env).
+_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# ── health ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def health():
     try:
         count = get_db()[VERSES].count_documents({})
         embedded = get_db()[VERSES].count_documents({"embedding": {"$exists": True}})
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         return {"status": "db_error", "error": str(e)}
     return {
         "status": "ok",
@@ -66,6 +73,8 @@ def health():
         "embed": settings.embed_model,
     }
 
+
+# ── personas / languages ──────────────────────────────────────────────────────
 
 @app.get("/api/personas")
 def list_personas():
@@ -82,6 +91,19 @@ def list_languages():
     ]
 
 
+# ── auth ──────────────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/signup", response_model=LoginResponse)
+def signup_endpoint(req: SignupRequest):
+    try:
+        signup(req.username, req.password, req.display_name)
+        # Persist display_name into user_profiles immediately.
+        memory_module.update_profile(req.username, display_name=req.display_name or req.username)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"token": create_token(req.username), "username": req.username}
+
+
 @app.post("/api/auth/login", response_model=LoginResponse)
 def login(req: LoginRequest):
     if not authenticate(req.username, req.password):
@@ -91,11 +113,34 @@ def login(req: LoginRequest):
 
 @app.get("/api/auth/me")
 def me(user: str = Depends(get_current_user)):
-    return {"username": user}
+    profile = memory_module.get_profile(user)
+    return {"username": user, "display_name": profile["display_name"]}
 
+
+# ── user profile ──────────────────────────────────────────────────────────────
+
+@app.get("/api/profile", response_model=UserProfile)
+def profile_get(user: str = Depends(get_current_user)):
+    return memory_module.get_profile(user)
+
+
+@app.patch("/api/profile", response_model=UserProfile)
+def profile_update(req: UserProfileUpdate, user: str = Depends(get_current_user)):
+    try:
+        memory_module.update_profile(
+            user,
+            display_name=req.display_name,
+            preferred_language=req.preferred_language,
+            answer_style=req.answer_style,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return memory_module.get_profile(user)
+
+
+# ── ask ───────────────────────────────────────────────────────────────────────
 
 def _save_turns(user: str, chat_id: str | None, req: AskRequest, result: dict) -> str:
-    """Persist this exchange into the user's chat document; returns the chat id."""
     chats = get_db()["chats"]
     now = _dt.datetime.now(_dt.timezone.utc)
     assistant_turn = {
@@ -140,20 +185,29 @@ def ask_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
             persona_key=req.persona,
             language=req.language,
             history=[t.model_dump() for t in req.history],
+            user=user,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
     result["chat_id"] = _save_turns(user, req.chat_id, req, result)
+    # Fire-and-forget: update the rolling memory summary in the background.
+    memory_module.update_memory_bg(user, req.question, result["answer"])
     return result
 
 
-# ---- saved chats ----
+# ── saved chats ───────────────────────────────────────────────────────────────
+
 @app.get("/api/chats", response_model=list[ChatSummary])
 def chats_list(user: str = Depends(get_current_user)):
     docs = get_db()["chats"].find({"user": user}).sort("updated_at", -1).limit(50)
     return [
-        {"id": str(d["_id"]), "title": d.get("title", ""), "persona": d.get("persona", "guide"),
-         "language": d.get("language", "english"), "updated": d["updated_at"].strftime("%Y-%m-%d %H:%M")}
+        {
+            "id": str(d["_id"]),
+            "title": d.get("title", ""),
+            "persona": d.get("persona", "guide"),
+            "language": d.get("language", "english"),
+            "updated": d["updated_at"].strftime("%Y-%m-%d %H:%M"),
+        }
         for d in docs
     ]
 
@@ -167,8 +221,13 @@ def chats_get(chat_id: str, user: str = Depends(get_current_user)):
     d = get_db()["chats"].find_one({"_id": oid, "user": user})
     if not d:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return {"id": str(d["_id"]), "title": d.get("title", ""), "persona": d.get("persona", "guide"),
-            "language": d.get("language", "english"), "turns": d.get("turns", [])}
+    return {
+        "id": str(d["_id"]),
+        "title": d.get("title", ""),
+        "persona": d.get("persona", "guide"),
+        "language": d.get("language", "english"),
+        "turns": d.get("turns", []),
+    }
 
 
 @app.delete("/api/chats/{chat_id}")
@@ -181,6 +240,8 @@ def chats_delete(chat_id: str, user: str = Depends(get_current_user)):
     return {"deleted": res.deleted_count == 1}
 
 
+# ── perspectives ──────────────────────────────────────────────────────────────
+
 @app.post("/api/perspectives", response_model=PerspectivesResponse)
 def perspectives_endpoint(req: PerspectivesRequest, user: str = Depends(get_current_user)):
     ratelimit.check(user)
@@ -189,6 +250,8 @@ def perspectives_endpoint(req: PerspectivesRequest, user: str = Depends(get_curr
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
+
+# ── daily ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/daily", response_model=DailyResponse)
 def daily_endpoint(
@@ -203,7 +266,8 @@ def daily_endpoint(
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
 
-# ---- Journal (per user) ----
+# ── journal ───────────────────────────────────────────────────────────────────
+
 @app.post("/api/journal", response_model=JournalEntry)
 def journal_save(req: JournalSaveRequest, user: str = Depends(get_current_user)):
     doc = {
@@ -236,7 +300,8 @@ def journal_delete(entry_id: str, user: str = Depends(get_current_user)):
     return {"deleted": res.deleted_count == 1}
 
 
-# ---- Web push (Daily Guidance notifications) ----
+# ── web push ──────────────────────────────────────────────────────────────────
+
 @app.get("/api/push/vapid")
 def push_vapid():
     return {"publicKey": settings.vapid_public_key, "enabled": push_module.enabled()}
@@ -258,7 +323,6 @@ def push_unsubscribe(body: dict, user: str = Depends(get_current_user)):
 
 @app.post("/api/push/test")
 def push_test(user: str = Depends(get_current_user)):
-    """Send the morning payload to all subscriptions now (for verification)."""
     return push_module.send_to_all("morning")
 
 

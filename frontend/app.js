@@ -1,11 +1,12 @@
-// ================= Dharma AI — frontend v2 =================
+// ================= Dharma AI — frontend v3 =================
 const API = "";
 let currentPersona = "krishna";
 let currentLanguage = "english";
 let currentMode = "converse"; // converse | perspectives | daily
 let currentUser = "";
+let currentDisplayName = "";
 let history = [];
-let chatId = null;   // saved-conversation id (server-side)
+let chatId = null;
 const LANG_BCP = { english: "en-IN" };
 
 const chat = document.getElementById("chat");
@@ -16,6 +17,7 @@ const micBtn = document.getElementById("micBtn");
 const languageSel = document.getElementById("language");
 const loginOverlay = document.getElementById("loginOverlay");
 const logoutBtn = document.getElementById("logoutBtn");
+const profileBtn = document.getElementById("profileBtn");
 const speakOverlay = document.getElementById("speakOverlay");
 
 const bcp47 = () => LANG_BCP[currentLanguage] || "en-IN";
@@ -27,10 +29,12 @@ const personaName = (k) => (personaMeta[k] && personaMeta[k].name) || "Dharma Gu
 
 // ================= auth =================
 let token = localStorage.getItem("dharma_token") || "";
+let isSignupMode = false;
 
 function showLogin(show) {
   loginOverlay.hidden = !show;
   logoutBtn.hidden = show;
+  profileBtn.hidden = show;
 }
 
 async function apiFetch(path, opts = {}) {
@@ -49,38 +53,72 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
+// ── signup/login toggle ──
+document.getElementById("toggleAuth").addEventListener("click", () => {
+  isSignupMode = !isSignupMode;
+  document.querySelectorAll(".signup-only").forEach((el) => {
+    el.style.display = isSignupMode ? "" : "none";
+  });
+  document.getElementById("loginSubmit").textContent = isSignupMode ? "Create account 🙏" : "Begin 🙏";
+  document.getElementById("toggleMsg").textContent = isSignupMode ? "Already have an account?" : "New here?";
+  document.getElementById("toggleAuth").textContent = isSignupMode ? "Sign in" : "Create account";
+  document.getElementById("loginUser").autocomplete = isSignupMode ? "username" : "username";
+  document.getElementById("loginPass").autocomplete = isSignupMode ? "new-password" : "current-password";
+  document.getElementById("loginError").hidden = true;
+});
+
 document.getElementById("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const errEl = document.getElementById("loginError");
   const btn = document.getElementById("loginSubmit");
   errEl.hidden = true;
-  btn.disabled = true; btn.textContent = "Opening the door…";
+  btn.disabled = true;
+  btn.textContent = isSignupMode ? "Creating account…" : "Opening the door…";
+
+  const username = document.getElementById("loginUser").value.trim();
+  const password = document.getElementById("loginPass").value;
+
   try {
-    const res = await fetch(`${API}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: document.getElementById("loginUser").value.trim(),
-        password: document.getElementById("loginPass").value,
-      }),
-    });
-    if (!res.ok) throw new Error((await res.json()).detail || "Sign-in failed");
-    const data = await res.json();
-    token = data.token;
-    currentUser = data.username;
-    localStorage.setItem("dharma_token", token);
+    if (isSignupMode) {
+      const confirm = document.getElementById("signupConfirm").value;
+      if (password !== confirm) throw new Error("Passwords do not match.");
+      const displayName = document.getElementById("signupName").value.trim();
+      const res = await fetch(`${API}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, display_name: displayName }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Signup failed");
+      const data = await res.json();
+      token = data.token;
+      currentUser = data.username;
+      localStorage.setItem("dharma_token", token);
+    } else {
+      const res = await fetch(`${API}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Sign-in failed");
+      const data = await res.json();
+      token = data.token;
+      currentUser = data.username;
+      localStorage.setItem("dharma_token", token);
+    }
     showLogin(false);
+    await loadProfileData();
     clearChat();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.hidden = false;
   } finally {
-    btn.disabled = false; btn.textContent = "Begin 🙏";
+    btn.disabled = false;
+    btn.textContent = isSignupMode ? "Create account 🙏" : "Begin 🙏";
   }
 });
 
 logoutBtn.addEventListener("click", () => {
-  token = ""; currentUser = "";
+  token = ""; currentUser = ""; currentDisplayName = "";
   localStorage.removeItem("dharma_token");
   stopSpeaking();
   clearChat();
@@ -92,10 +130,70 @@ async function initAuth() {
   try {
     const me = await apiFetch("/api/auth/me");
     currentUser = me.username;
+    currentDisplayName = me.display_name || me.username;
     showLogin(false);
+    await loadProfileData();
     clearChat();
   } catch (e) { /* login already shown */ }
 }
+
+// ================= profile =================
+const profileOverlay = document.getElementById("profileOverlay");
+
+async function loadProfileData() {
+  try {
+    const p = await apiFetch("/api/profile");
+    currentDisplayName = p.display_name || currentUser;
+    // Sync language selector if profile has a preference.
+    if (p.preferred_language && p.preferred_language !== currentLanguage) {
+      currentLanguage = p.preferred_language;
+      if (languageSel) languageSel.value = currentLanguage;
+    }
+  } catch (e) { /* quiet */ }
+}
+
+profileBtn.addEventListener("click", openProfile);
+document.getElementById("profileClose").addEventListener("click", () => { profileOverlay.hidden = true; });
+
+async function openProfile() {
+  try {
+    const p = await apiFetch("/api/profile");
+    document.getElementById("profileName").value = p.display_name || "";
+    // Populate language options into profile lang select.
+    const pLang = document.getElementById("profileLang");
+    pLang.innerHTML = languageSel.innerHTML;
+    pLang.value = p.preferred_language || currentLanguage;
+    document.getElementById("profileStyle").value = p.answer_style || "deep";
+    document.getElementById("profileStatus").hidden = true;
+  } catch (e) { /* show stale */ }
+  profileOverlay.hidden = false;
+}
+
+document.getElementById("profileSave").addEventListener("click", async () => {
+  const statusEl = document.getElementById("profileStatus");
+  statusEl.hidden = true;
+  const payload = {
+    display_name: document.getElementById("profileName").value.trim() || undefined,
+    preferred_language: document.getElementById("profileLang").value || undefined,
+    answer_style: document.getElementById("profileStyle").value || undefined,
+  };
+  try {
+    const p = await apiFetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    currentDisplayName = p.display_name || currentUser;
+    if (p.preferred_language) { currentLanguage = p.preferred_language; if (languageSel) languageSel.value = currentLanguage; }
+    statusEl.textContent = "Saved 🙏";
+    statusEl.hidden = false;
+    setTimeout(() => { profileOverlay.hidden = true; }, 1000);
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.style.color = "#ffb38a";
+    statusEl.hidden = false;
+  }
+});
 
 // ================= welcome / modes =================
 function greeting() {
@@ -104,7 +202,7 @@ function greeting() {
 }
 
 function welcomeHTML() {
-  const who = currentUser ? `, ${currentUser}` : "";
+  const who = currentDisplayName ? `, ${currentDisplayName}` : (currentUser ? `, ${currentUser}` : "");
   return `
   <div class="welcome" id="welcome">
     ${faceHTML(currentPersona)}
@@ -312,7 +410,7 @@ function versesHtml(sources) {
     return `
     <div class="verse" id="src-${v.ref.replace(/[^\w]/g, "")}">
       <div class="verse-ref">${escapeHtml(v.ref)} ${badge}</div>
-      <div class="verse-trans">“${escapeHtml(v.translation)}”</div>
+      <div class="verse-trans">"${escapeHtml(v.translation)}"</div>
       ${v.transliteration ? `<div class="verse-sanskrit">${escapeHtml(v.transliteration)}</div>` : ""}
       <div class="verse-meta">${teacher ? "" : "Trans. "}${escapeHtml(v.translator)} · ${escapeHtml(v.source || "Bhagavad Gita")}</div>
     </div>`;
@@ -398,7 +496,7 @@ function renderPerspectives(wrap, data) {
     </div>`).join("");
   wrap.innerHTML = `
     <div class="perspectives-card">
-      <div class="perspectives-q">“${escapeHtml(data.question)}”</div>
+      <div class="perspectives-q">"${escapeHtml(data.question)}"</div>
       <div class="perspectives-sub">Five traditions answer, each from its own scripture</div>
       ${views}
       ${sourcesBlock(data.citations || [], true)}
@@ -424,7 +522,7 @@ function renderDaily(data) {
   wrap.innerHTML = `
     <div class="daily-card">
       <div class="daily-eyebrow">${escapeHtml(data.period)} · ${escapeHtml(data.date)}</div>
-      <div class="daily-verse">“${escapeHtml(data.verse.translation)}”</div>
+      <div class="daily-verse">"${escapeHtml(data.verse.translation)}"</div>
       <a class="cite" data-ref="${escapeHtml(data.verse.ref)}">${escapeHtml(data.verse.ref)}</a>
       <div class="daily-block"><div class="daily-h">Reflection <span class="layer-badge teacher" style="vertical-align:middle">AI interpretation</span></div><p>${escapeHtml(data.reflection)}</p></div>
       <div class="daily-block"><div class="daily-h">${data.period === "morning" ? "Today's practice" : "Evening practice"}</div><p>${escapeHtml(data.practice)}</p></div>
@@ -600,7 +698,6 @@ if (SR) {
 let speakingBtn = null;
 let activeStage = null;
 
-// Voices load ASYNC in browsers — getVoices() is often empty on first call.
 let _voicesPromise = null;
 function loadVoices() {
   if (_voicesPromise) return _voicesPromise;
@@ -613,7 +710,6 @@ function loadVoices() {
   return _voicesPromise;
 }
 
-// Prefer deep male Indian voices, then natural ones; match by language family.
 function pickVoice(voices, lang) {
   const two = lang.slice(0, 2);
   const pref = /(ravi|hemant|prabhat|madhur|swara|valluvar|male)/i;
@@ -642,7 +738,7 @@ function speakRaw(text, stageEl, onend, onnovoice) {
     const v = pickVoice(voices, lang);
     if (v) u.voice = v;
     u.rate = 0.95;
-    u.pitch = 0.82; // deeper, calmer — no baby voice
+    u.pitch = 0.82;
     activeStage = stageEl;
     stageEl.classList.add("talking");
     let spoke = false;
@@ -650,7 +746,6 @@ function speakRaw(text, stageEl, onend, onnovoice) {
     const done = () => {
       stageEl.classList.remove("talking");
       activeStage = null;
-      // Device has no voice for this language: tell the user instead of silent failure.
       if (!spoke && !v && lang.slice(0, 2) !== "en" && onnovoice) {
         onnovoice(LANG_LABEL[lang.slice(0, 2)] || lang);
       }
@@ -659,7 +754,6 @@ function speakRaw(text, stageEl, onend, onnovoice) {
     u.onend = done;
     u.onerror = done;
     window.speechSynthesis.speak(u);
-    // Safety: if nothing started within 3s and no voice exists, surface the issue.
     setTimeout(() => { if (!spoke && !v && lang.slice(0, 2) !== "en") { window.speechSynthesis.cancel(); } }, 3000);
   });
 }
@@ -721,7 +815,6 @@ async function convoAsk(question) {
   convoBusy = true;
   convoStatus.textContent = "listening to your heart…";
   convoText.textContent = "“" + question + "”";
-  // mirror into the chat behind, so text mode keeps the full record (with sources)
   addUser(question);
   const wrap = addTyping();
   try {
@@ -734,7 +827,6 @@ async function convoAsk(question) {
     if (data.chat_id) chatId = data.chat_id;
     history.push({ role: "user", content: question });
     history.push({ role: "assistant", content: data.answer || "" });
-    // conversational view: just the words, no sources
     const spoken = cleanForSpeech(data.answer || "");
     convoText.textContent = spoken;
     convoStatus.textContent = personaName(currentPersona) + " is speaking…";
@@ -755,7 +847,6 @@ async function convoAsk(question) {
   }
 }
 
-// dedicated recognizer for conversation mode
 if (SR) {
   const crec = new SR();
   crec.interimResults = false;
@@ -770,13 +861,12 @@ if (SR) {
   crec.onstart = () => { clistening = true; convoMic.classList.add("listening"); convoStatus.textContent = "listening…"; };
   crec.onend = () => { clistening = false; convoMic.classList.remove("listening"); };
   crec.onresult = (ev) => convoAsk(ev.results[0][0].transcript);
-  crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn't catch that — tap the mic again"; };
+  crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn’t catch that — tap the mic again"; };
 } else {
   convoMic.style.opacity = 0.4;
   convoStatus.textContent = "voice needs Chrome/Safari over HTTPS";
 }
 
-// open conversation mode by tapping the big welcome avatar or the talk chip
 chat.addEventListener("click", (e) => {
   if (e.target.closest(".talk-chip") || e.target.closest("#welcome .avatar")) openConvo();
 });

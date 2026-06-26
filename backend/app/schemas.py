@@ -98,6 +98,25 @@ class LoginResponse(BaseModel):
     username: str
 
 
+class SignupRequest(BaseModel):
+    username: str = Field(..., min_length=2, max_length=40, pattern=r"^[a-zA-Z0-9_]+$")
+    password: str = Field(..., min_length=6, max_length=128)
+    display_name: str = Field("", max_length=80)
+
+
+# ---- User Profile ----
+class UserProfile(BaseModel):
+    display_name: str
+    preferred_language: str
+    answer_style: str  # "short" | "deep" | "reflective"
+
+
+class UserProfileUpdate(BaseModel):
+    display_name: str | None = Field(None, max_length=80)
+    preferred_language: str | None = None
+    answer_style: str | None = None
+
+
 # ---- Journal ----
 class JournalSaveRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=5000)

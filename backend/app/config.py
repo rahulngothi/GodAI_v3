@@ -33,8 +33,11 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 
-    # Auth (token signing). Override via JWT_SECRET in .env for production.
+    # Auth (token signing). Set JWT_SECRET in .env — never use the default in production.
     jwt_secret: str = "dharma-dev-secret-change-me"
+
+    # CORS — comma-separated allowed origins, e.g. "http://localhost:8000,https://yourdomain.com"
+    allowed_origins: str = "*"
 
     # Web Push (VAPID). Empty disables push features gracefully.
     vapid_public_key: str = ""

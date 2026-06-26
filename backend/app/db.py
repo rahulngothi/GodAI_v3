@@ -21,3 +21,11 @@ def get_client() -> MongoClient:
 
 def get_db() -> Database:
     return get_client()[settings.mongo_db]
+
+
+def ensure_indexes() -> None:
+    db = get_db()
+    db["users"].create_index("username", unique=True)
+    db["user_profiles"].create_index("user", unique=True)
+    db["user_memory"].create_index("user", unique=True)
+    db["chats"].create_index([("user", 1), ("updated_at", -1)])

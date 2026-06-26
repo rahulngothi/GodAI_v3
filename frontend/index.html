@@ -17,18 +17,50 @@
   <div class="bg-aura"></div>
   <div class="bg-mandala"></div>
 
-  <!-- Sign in -->
+  <!-- Sign in / Sign up -->
   <div id="loginOverlay" class="login-overlay" hidden>
     <form id="loginForm" class="login-card" autocomplete="on">
       <div class="login-om">ॐ</div>
       <h1>Dharma AI</h1>
       <p class="login-sub">Sit with Krishna, Buddha, Vivekananda…<br/>and ask what weighs on your heart.</p>
       <div class="login-faces" id="loginFaces"></div>
+
+      <!-- display name: signup only -->
+      <input id="signupName" type="text" placeholder="Your name (optional)" autocomplete="name" class="signup-only" style="display:none" />
       <input id="loginUser" type="text" placeholder="Username" autocomplete="username" required />
       <input id="loginPass" type="password" placeholder="Password" autocomplete="current-password" required />
+      <!-- confirm password: signup only -->
+      <input id="signupConfirm" type="password" placeholder="Confirm password" autocomplete="new-password" class="signup-only" style="display:none" />
+
       <button type="submit" class="login-btn" id="loginSubmit">Begin 🙏</button>
       <div id="loginError" class="login-error" hidden></div>
+      <div class="login-toggle">
+        <span id="toggleMsg">New here?</span>
+        <button type="button" id="toggleAuth" class="link-btn">Create account</button>
+      </div>
     </form>
+  </div>
+
+  <!-- Profile sheet -->
+  <div id="profileOverlay" class="login-overlay" hidden>
+    <div class="login-card profile-card">
+      <div class="profile-head">
+        <span class="profile-title">Your profile</span>
+        <button type="button" id="profileClose" class="icon-chip" aria-label="Close">✕</button>
+      </div>
+      <label class="profile-label">Display name</label>
+      <input id="profileName" type="text" placeholder="Your name" maxlength="80" />
+      <label class="profile-label">Default language</label>
+      <select id="profileLang" class="profile-select"></select>
+      <label class="profile-label">Answer depth</label>
+      <select id="profileStyle" class="profile-select">
+        <option value="deep">Deep — full teachings</option>
+        <option value="short">Short — concise replies</option>
+        <option value="reflective">Reflective — questions back to me</option>
+      </select>
+      <button type="button" id="profileSave" class="login-btn" style="margin-top:6px">Save 🙏</button>
+      <div id="profileStatus" class="login-error" style="color:#3f7d52" hidden></div>
+    </div>
   </div>
 
   <!-- Speaking view (listen button) -->
@@ -76,6 +108,7 @@
       <div class="topbar-right">
         <select id="language" class="lang-select" aria-label="Language"></select>
         <button id="clearBtn" class="icon-chip" title="New conversation">↺</button>
+        <button id="profileBtn" class="icon-chip" title="Profile" hidden>⚙</button>
         <button id="logoutBtn" class="icon-chip" title="Sign out" hidden>⎋</button>
         <button id="installBtn" class="install-btn" hidden>Install</button>
       </div>
