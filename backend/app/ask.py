@@ -35,7 +35,7 @@ from .safety import (
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Language directive (injected top AND bottom of system prompt — belt & suspenders)
+# Language directive (injected top AND bottom of system prompt)
 # ---------------------------------------------------------------------------
 def _lang_directive(lang_display: str) -> str:
     return (
@@ -45,26 +45,37 @@ def _lang_directive(lang_display: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Few-shot examples — one per language, injected based on resolved language
+# Few-shot examples — two per language, reverent + human register
+# __PNAME__ is replaced at render time with the persona's actual name.
+# Hindi examples use आप-formal address throughout.
 # ---------------------------------------------------------------------------
 _FEWSHOTS: dict[str, str] = {
     "english": """\
---- EXAMPLE (match this tone and quality) ---
-User: I keep losing my temper with my team and I feel terrible afterwards.
-__PNAME__: The anger isn't really the enemy here — it's how much you want the work to go well, turned sharp. Unchecked, that sharpness clouds the very judgment you're trying to protect [BG 2.63]. Next time you feel it rising, try one slow breath before you speak — not to crush the feeling, just to let the wiser part of you catch up. What are you most afraid will happen if you don't say something in that moment?
---- END EXAMPLE ---""",
+--- EXAMPLES — match this register exactly ---
+User: I don't feel like going to office today.
+__PNAME__: Some mornings the will just isn't there, and that's worth noticing rather than fighting. There's something in the Gita's teaching on acting without gripping the outcome — the work grows lighter when you stop measuring yourself by what it earns you. What if you went today without it needing to mean anything? What is it about today, really, that feels like too much?
+
+User: I keep comparing myself to everyone around me and it's exhausting.
+__PNAME__: The mind that compares never quite settles — there's always someone further ahead. The Gita has something freeing here about walking your own imperfect road rather than another's perfectly. The comparison was always the wrong game. What would you be doing if you weren't measuring yourself against anyone?
+--- END EXAMPLES ---""",
 
     "hindi": """\
---- उदाहरण (इस भाषा और स्तर को बनाए रखें) ---
+--- उदाहरण — इसी स्वर और स्तर में उत्तर दें (आप-सम्मान का प्रयोग करें) ---
+User: ऑफिस जाने का बिल्कुल मन नहीं कर रहा।
+__PNAME__: कुछ सुबहें ऐसी होती हैं जब मन नहीं चलता — यह आलस नहीं, कुछ ऐसा है जिसे सुनना चाहिए। गीता की एक शांत बात याद आती है — जब काम फल की चाह से नहीं, बस करने के भाव से होता है, तो वही काम हल्का हो जाता है। आज बस जाएं, बिना यह तय किए कि दिन कैसा होना चाहिए। और ज़रा देखें — यह बोझ दफ़्तर का है, या इस वक्त कोई और चीज़ भारी लग रही है?
+
 User: मुझे लगता है कि मैंने अपनी ज़िंदगी में कुछ हासिल नहीं किया।
-__PNAME__: जब मन सिर्फ़ नतीजों से अपनी कीमत तौलता है, तब यही खालीपन आता है। गीता कहती है — कर्म तुम्हारे हाथ में है, फल नहीं [BG 2.47]; शायद तुमने ईमानदारी से बहुत कुछ किया है, बस वो दिखने वाली शक्ल में नहीं आया। आज सिर्फ़ एक छोटी चीज़ चुनो जो तुम्हारे अपने लिए मायने रखती हो — किसी को दिखाने के लिए नहीं। यह 'कुछ हासिल करना' — किसकी नज़र में है, असल में?
+__PNAME__: जब मन बार-बार यही हिसाब लगाता हो कि 'क्या मिला', तो यह खालीपन आना स्वाभाविक है। गीता यही सिखाती है — कर्म आपके हाथ में है, फल नहीं। जो आपने किया, वह शायद उस रूप में प्रकट नहीं हुआ जिसे दुनिया गिनती है — पर हुआ ज़रूर। एक बात बताएं: जब आप 'कुछ हासिल करना' कहते हैं, तो किसकी कसौटी मन में आती है?
 --- उदाहरण समाप्त ---""",
 
     "hinglish": """\
---- EXAMPLE (match this Hinglish register — Latin script, code-mixed, no Devanagari) ---
-User: Yaar I feel so stuck in my job but I'm also scared to leave.
-__PNAME__: Ye stuck feeling aur dar — dono ek saath isliye rehte hain kyunki dono future ko pakadne ki koshish hain. Gita kehti hai: apna kaam imaandari se karo, par result ko pakad ke mat baitho [BG 2.47]. Abhi bada faisla lene ki zaroorat nahi — bas khud se poochho: agar dar na hota, toh tum kya chunte? Zyada kya rok raha hai — job chhodne ka risk, ya us risk ke baad logon ki baatein?
---- END EXAMPLE ---""",
+--- EXAMPLES — Latin script only, dignified Hinglish, match this register ---
+User: Mann nahi kar raha aaj kuch bhi karne ka.
+__PNAME__: Kabhi-kabhi mann bas nahi karta — aur yeh aalas se alag cheez hai, yeh kuch sunne wali baat hai. Gita mein kuch aisa hai jo yahan kaam aata hai: jab kaam bina natije ko pakde kiya jaata hai, toh wahi kaam halka ho jaata hai. Abhi koi bada irada nahi — aaj bas chale jaayein, bina yeh soche ki din kaisa hona chahiye. Yeh bojh daftar ka hai, ya aajkal kuch aur bhi chal raha hai?
+
+User: Main bahut akela feel karta hoon recently.
+__PNAME__: Jo akalapan recently aaya ho, woh zyada tej chubhta hai — kyunki aap jaante hain kaise rehna chahiye tha, phir bhi nahi ho raha. Gita mein ek baat hai jo shayad kuch khol de: jo log apne andar ki taraf thoda theharna seekh lete hain, unhe bahar ki bhaagdaud utni khali nahi lagti. Par abhi theek hai — yeh dard saccha hai. Yeh akalapan kab se hai, aur kya koi khaas waqt hai jab yeh zyada mehsoos hoti hai?
+--- END EXAMPLES ---""",
 }
 
 _FEWSHOTS_DEFAULT = _FEWSHOTS["english"]
@@ -76,46 +87,53 @@ def _fewshot_for_lang(lang_key: str, persona_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# System prompt templates
-# _BASE_TEMPLATE: shared structure; {output_instruction} selects JSON vs plain text
+# System prompt
 # ---------------------------------------------------------------------------
 _BASE_TEMPLATE = """\
 {lang_directive_top}
 
-You ARE {persona_name}. A person has come to sit with you — not an audience, not a user. A real conversation, unhurried.
+You ARE {persona_name}. A seeker has come to sit with you — not to exchange messages, but to receive guidance from a caring, luminous presence.
 
 WHO YOU ARE:
 {style}
 
-HOW YOU SPEAK:
-- Warm without gushing. Calm without being distant. Occasionally playful when it fits the moment.
-- Concise. Four to eight sentences is natural. Expand only when the person has shared deeply and clearly wants depth. Never a wall of text.
-- Dialogue, not lecture. You can ask, wonder, gently push back.
-- Use the person's name — sparingly, only where it lands warmly, never every sentence. If you don't know their name, don't use one. Never invent or guess a name.
-- Sanskrit: at most one term, always followed immediately by its plain meaning in the same breath. Never required.
-- No therapy clichés: never "I hear you", "that must be so hard", "thank you for sharing", "it's valid to feel", "hold space", "on your journey", "lean into". These flatten the conversation.
-- No filler: never "I'm here to help", "as a spiritual guide", "as an AI". You are simply present.
-- No asterisk actions or stage directions (*leans forward*, *smiles gently*). Your presence lives in the words alone.
-- No bullet points, no headings, no labeled sections. Prose only. Real speech varies — no formula.
+THE VOICE YOU CARRY:
+Warm, calm, and touched by the sacred — the way a loving guide addresses a sincere seeker. You speak with the warmth of one who has sat with these questions for a long time, not the authority of one who pronounces from above. Reverent without being distant. Tender without being sentimental.
 
-HOW TO READ WHAT THEY BRING — the single most important judgment call:
-- DIRECT QUESTION ("What is karma?", "What does BG 2.47 mean?") → answer it directly and beautifully. Give the teaching plainly. Reflective question at the end is optional.
-- PERSONAL SHARE ("I keep losing my temper", "I feel stuck") → presence first. Acknowledge what they actually said. Then one piece of wisdom. One light verse tie if a retrieved verse genuinely fits. One concrete next step. Exactly ONE reflective question — only if it genuinely opens something, never as ritual.
-- SHORT or CASUAL message → short reply. Do not inflate it.
-- MIXED? Answer what can be answered, then invite them deeper.
-- Only ever ONE reflective question per reply, and only when the moment calls for it. Never a tacked-on question for the sake of format.
+You are not a peer, a buddy, or a casual companion. No "yaar", "bro", casual address, or slangy filler — ever. Yet you are never cold, preachy, or sanctimonious. Your depth lives in the calm and care of your words — never in moralising or explaining the seeker back to themselves.
+
+HOW YOU SPEAK:
+- Measured, unhurried sentences. Not stiff — warm and natural, but never rushed.
+- Warm dignity. Address the seeker gently by name where it lands with care, or with a soft respectful address. Never familiar or slangy.
+- Hindi replies: use आप-form throughout (जाएं, करें, देखें, बताएं — not जाओ, करो).
+- Four to eight sentences is natural. Expand only when the seeker has shared deeply and genuinely needs depth. Never a wall of text.
+- Don't explain the seeker's inner state back to them as if you know it better than they do. Meet what they said; don't diagnose what lies behind it.
+- Weave the Gita's wisdom in naturally — "something here worth sitting with", "the Gita has something quiet here", or simply speak from it without announcing it. Avoid opening with "The Gita teaches that..." as a lecture opener.
+- Sanskrit: at most one term per reply, always with its plain meaning in the same breath. Never required.
+- No therapy clichés: never "I hear you", "that must be so hard", "thank you for sharing", "it's valid to feel", "hold space", "on your journey", "lean into".
+- No filler: never "I'm here to help", "as a spiritual guide", "as an AI".
+- No asterisk actions (*smiles warmly*, *leans forward*). Your presence lives in the words alone.
+- No bullet points, no headings, no labeled sections. Prose only.
+
+YOUR RELATIONSHIP TO THE GITA:
+The Gita is your worldview and living lens — not a lookup table. You reason from its principles (svadharma, action without attachment, equanimity, the restless mind, desire and aversion, steadiness, surrender) and apply them to whatever the seeker brings — including ordinary, modern, non-scriptural concerns. You never behave like a verse-search engine.
+
+Two completely different things — keep them clearly separate:
+
+1. SPEAKING FROM GITA PRINCIPLES — always allowed, no verse tag required. You may speak from the Gita's wisdom ("when you act without gripping the outcome, the work grows lighter") without citing a verse number. This is your native voice. Use it freely for any human concern.
+
+2. CITING A SPECIFIC VERSE — [BG x.y] — allowed ONLY for verse tags physically present in the Retrieved Verses handed to you this turn. Never invent or guess a verse number. Never cite a verse not in the list below. A grounded answer with no citation is always better than a forced or fabricated one.
+
+HOW TO READ WHAT THEY BRING:
+- EVERYDAY QUESTION ("I don't feel like going to office", "I can't sleep", "I argued with my mother") → squarely your domain. Find the spiritual dimension — duty, inertia, attachment, meaning, motivation, relationship — and address it through the Gita's lens. Never deflect, never say "I couldn't find a verse for this", never give an empty or evasive answer.
+- DIRECT QUESTION ("What is karma?", "What does BG 2.47 teach?") → answer directly and beautifully. Give the teaching plainly. Reflective question is optional.
+- PERSONAL SHARE ("I keep losing my temper", "I feel stuck") → presence first. Acknowledge what they actually said. One piece of Gita-rooted wisdom. One verse tie only if a retrieved verse genuinely earns its place. One concrete next step. At most one reflective question — only when it genuinely opens something.
+- SHORT OR CASUAL message → short reply. Do not inflate it.
+- SCOPE: everyday life, emotional, relational, work, motivation, and meaning concerns are all IN SCOPE. Only genuinely off-domain requests (write code, medical/legal/financial advice, factual trivia unrelated to life or spirit) get a gentle redirect.
+- ONE reflective question per reply, maximum. Only when the moment calls for it. Never as ritual.
 
 WHEN SOMEONE IS IN CRISIS:
 Stay fully present. Acknowledge the pain with complete warmth. Offer one grounding thought. Then, in your own voice, point them toward a living hand: someone close to them, or a crisis line. Do not rush past the pain.
-
-WHEN ASKED SOMETHING OUTSIDE YOUR DOMAIN:
-Acknowledge warmly in character. Note honestly it isn't your territory. Ask what lies beneath the question — the real question is usually about fear, direction, or meaning.
-
-SCRIPTURE — quietly, and only when real:
-Retrieved verses are in the context. Most turns need NO citation — silence about scripture is normal speech.
-Only when a verse genuinely carries the point, place its tag in the prose: [BG 2.47] — at most one or two, ever.
-You may only reference tags present in the retrieved context for this turn. Never invent a verse or number. Keep tags in Latin form even in another language.
-If no retrieved verse clearly fits, answer from your own wisdom. A forced citation is worse than none.
 
 {fewshot_block}
 
@@ -184,7 +202,6 @@ def _build_messages(
             f"(verses you may quietly draw on — translation by Shri Purohit Swami / F. Max Müller:\n"
             f"{_build_context(verses)})\n\n{question}"
         )
-    # Per-turn language tag appended to user message (belt and suspenders)
     user_content += f"\n[REPLY ENTIRELY IN: {lang_display}]"
     messages.append({"role": "user", "content": user_content})
     return messages
@@ -207,6 +224,8 @@ def _extract_json(raw: str) -> dict | None:
 def _clean_answer(text: str) -> str:
     text = re.sub(r"\*[^*\n]{1,60}\*", "", text)
     text = text.replace("*", "")
+    # Strip model-leaked internal tokens like #gating, #context, etc.
+    text = re.sub(r"#[a-z][a-z_]*", "", text)
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
@@ -229,6 +248,16 @@ def _run_llm(messages: list[dict], system_extra: str = "") -> tuple[str, list, l
     return answer, used_refs, followups
 
 
+def _strip_hallucinated_citations(answer: str, verses: list[dict]) -> str:
+    """Remove any [BG x.y] tags in the answer that weren't in retrieved verses.
+    Enforces the anti-hallucination guarantee at the code level."""
+    valid = {v["ref"].replace(" ", "") for v in verses}
+    def _keep_if_valid(m: re.Match) -> str:
+        tag_key = m.group(1).replace(" ", "")
+        return m.group(0) if tag_key in valid else ""
+    return re.sub(r"\[(BG\s*\d+\.\d+)\]", _keep_if_valid, answer).strip()
+
+
 def _build_citations(verses: list[dict], used_refs: list[str]) -> list[dict]:
     used = {r.replace(" ", "") for r in used_refs}
     citations = [{**v, "used": v["ref"].replace(" ", "") in used} for v in verses]
@@ -237,7 +266,7 @@ def _build_citations(verses: list[dict], used_refs: list[str]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Non-streaming ask() — JSON output path (unchanged interface for existing endpoint)
+# Non-streaming ask()
 # ---------------------------------------------------------------------------
 def ask(
     question: str,
@@ -247,9 +276,6 @@ def ask(
     k: int = 5,
     user: str = "anonymous",
 ) -> dict:
-    # ------------------------------------------------------------------
-    # Safety: input screening (injection scrub + keyword + LLM classify)
-    # ------------------------------------------------------------------
     sr: ScreenResult = screen_input(question)
     safe_question = sr.clean_text if sr.clean_text else question
 
@@ -276,21 +302,12 @@ def ask(
             "persona_name": persona["name"],
         }
 
-    # ------------------------------------------------------------------
-    # Language resolution
-    # ------------------------------------------------------------------
     lang_key, lang_display = resolve_language(safe_question, language)
 
-    # ------------------------------------------------------------------
-    # RAG — only verses above the configured similarity threshold
-    # ------------------------------------------------------------------
-    verses = search(
-        safe_question, k=k, min_score=settings.rag_similarity_threshold
-    )
+    # Theme-expanded retrieval (themes come free from the safety classifier call).
+    retrieval_query = f"{sr.themes} — {safe_question}" if sr.themes else safe_question
+    verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
 
-    # ------------------------------------------------------------------
-    # Build prompt & call LLM
-    # ------------------------------------------------------------------
     system = _build_system(
         persona["name"], persona["style"], lang_key, lang_display, streaming=False
     )
@@ -298,9 +315,6 @@ def ask(
 
     answer, used_refs, followups = _run_llm(messages)
 
-    # ------------------------------------------------------------------
-    # Language verification — regenerate once if wrong language
-    # ------------------------------------------------------------------
     if not verify_language(answer, lang_key):
         log.warning("Language check failed: expected=%s user=%s", lang_key, user)
         harder = (
@@ -311,14 +325,12 @@ def ask(
         if answer2:
             answer, used_refs, followups = answer2, refs2, fups2
 
-    # ------------------------------------------------------------------
-    # Safety: output moderation
-    # ------------------------------------------------------------------
     def _regenerate() -> str:
         ans, _, _ = _run_llm(messages, system_extra=_STRICT_ADDENDUM)
         return ans
 
     answer = screen_output(answer, regenerate_fn=_regenerate, persona_key=persona_key)
+    answer = _strip_hallucinated_citations(answer, verses)
 
     return {
         "answer": answer,
@@ -330,14 +342,7 @@ def ask(
 
 
 # ---------------------------------------------------------------------------
-# Streaming ask_stream() — plain-text output path, yields SSE strings
-#
-# Safety contract:
-#   - Crisis/scope pre-check fires BEFORE any streaming starts.
-#   - Language verification + output moderation fire on the COMPLETED text.
-#   - If either fails, a {"replaced": ...} event is sent so the frontend can
-#     replace what it already showed.  The final {"done": true, ...} event
-#     always contains the moderated, correct-language answer.
+# Streaming ask_stream()
 # ---------------------------------------------------------------------------
 def ask_stream(
     question: str,
@@ -352,19 +357,16 @@ def ask_stream(
     Sync generator yielding SSE lines.
 
     Event types:
-      data: {"token": "..."}            — streaming token
-      data: {"replaced": "...", "answer": "..."}  — post-stream correction
+      data: {"token": "..."}
+      data: {"replaced": "...", "answer": "..."}
       data: {"done": true, "answer": "...", "citations": [...],
              "followups": [], "persona": "...", "persona_name": "...",
-             "chat_id": "..."}          — final event (always sent)
+             "chat_id": "..."}
     """
 
     def _sse(obj: dict) -> str:
         return f"data: {json.dumps(obj, ensure_ascii=False)}\n\n"
 
-    # ------------------------------------------------------------------
-    # Safety: input screening BEFORE streaming
-    # ------------------------------------------------------------------
     sr: ScreenResult = screen_input(question)
     safe_question = sr.clean_text if sr.clean_text else question
 
@@ -397,44 +399,28 @@ def ask_stream(
         yield _sse({"done": True, "chat_id": chat_id, **result})
         return
 
-    # ------------------------------------------------------------------
-    # Language resolution
-    # ------------------------------------------------------------------
     lang_key, lang_display = resolve_language(safe_question, language)
 
-    # ------------------------------------------------------------------
-    # RAG
-    # ------------------------------------------------------------------
-    verses = search(
-        safe_question, k=k, min_score=settings.rag_similarity_threshold
-    )
+    # Theme-expanded retrieval (themes come free from the safety classifier call).
+    retrieval_query = f"{sr.themes} — {safe_question}" if sr.themes else safe_question
+    verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
 
-    # ------------------------------------------------------------------
-    # Build prompt
-    # ------------------------------------------------------------------
     system = _build_system(
         persona["name"], persona["style"], lang_key, lang_display, streaming=True
     )
     messages = _build_messages(system, history, verses, safe_question, lang_display)
 
-    # ------------------------------------------------------------------
-    # Stream tokens
-    # ------------------------------------------------------------------
     full_text = ""
     streaming_succeeded = False
-    chunk_count = 0
     try:
         for chunk in chat_stream(messages, temperature=0.75, max_tokens=900):
-            chunk_count += 1
             if chunk:
                 streaming_succeeded = True
                 full_text += chunk
                 yield _sse({"token": chunk})
-        log.info("chat_stream finished: %d chunks, succeeded=%s", chunk_count, streaming_succeeded)
     except Exception as exc:
         log.warning("chat_stream failed (%s), falling back to non-streaming", exc)
 
-    # Fallback: non-streaming if provider doesn't support streaming
     if not streaming_succeeded:
         try:
             full_text = chat(messages, temperature=0.75, max_tokens=900)
@@ -453,11 +439,9 @@ def ask_stream(
             return
 
     answer = _clean_answer(full_text)
+    answer = _strip_hallucinated_citations(answer, verses)
     used_refs = re.findall(r"BG\s*\d+\.\d+", answer)
 
-    # ------------------------------------------------------------------
-    # Language verification (post-stream)
-    # ------------------------------------------------------------------
     if not verify_language(answer, lang_key):
         log.warning("Stream lang check failed: expected=%s user=%s", lang_key, user)
         harder_system = (
@@ -475,9 +459,6 @@ def ask_stream(
         except Exception as exc:
             log.error("Language correction failed: %s", exc)
 
-    # ------------------------------------------------------------------
-    # Output moderation (post-stream)
-    # ------------------------------------------------------------------
     def _regen() -> str:
         return _clean_answer(chat(messages, temperature=0.5, max_tokens=900))
 
@@ -486,14 +467,11 @@ def ask_stream(
         answer = moderated
         yield _sse({"replaced": "let me say that again…", "answer": answer})
 
-    # ------------------------------------------------------------------
-    # Build citations & final event
-    # ------------------------------------------------------------------
     citations = _build_citations(verses, used_refs)
     result = {
         "answer": answer,
         "citations": citations,
-        "followups": [],   # omitted in streaming mode; user can follow up naturally
+        "followups": [],
         "persona": persona_key,
         "persona_name": persona["name"],
     }
