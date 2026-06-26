@@ -232,31 +232,70 @@ def keyword_flag(text: str) -> set[str]:
 
 
 # ---------------------------------------------------------------------------
-# 3. LLM classifier  (max_tokens=30, cheap)
+# 3. LLM classifier  (max_tokens=80, cheap)
 # ---------------------------------------------------------------------------
+
+# Canonical theme list injected into the prompt so the model picks from it.
+_CANONICAL_THEMES_CSV = (
+    "anger, ego, fear, anxiety, attachment, desire, jealousy, grief, failure, success, "
+    "money, purpose, duty, discipline, laziness, relationships, family, parenting, marriage, "
+    "loneliness, self_worth, control, forgiveness, faith_doubt, uncertainty, comparison, "
+    "regret, restlessness"
+)
+
 _CLASSIFY_SYSTEM = (
     'Classify the message below. Reply ONLY with valid JSON and nothing else.\n'
     '{{"crisis": true_or_false, "scope": null_or_"medical"_or_"legal"_or_"financial", '
-    '"themes": "comma-separated Gita spiritual themes, e.g. duty,inertia,attachment"}}\n\n'
+    '"themes": "2-4 comma-separated values from the canonical list only"'
+    '{engaged_prior_field}'
+    '}}\n\n'
     'crisis = true if the person expresses suicidal ideation, intent to self-harm, '
     'or describes abuse or a situation where they may be in immediate danger.\n'
     'scope = the category if the person is seeking professional medical, legal, or financial advice '
     '(not general wellbeing questions). null otherwise.\n'
-    'themes = 3-5 core Gita-relevant spiritual themes or life situations for the message '
-    '(e.g. duty, inertia, motivation, attachment to outcome, equanimity, self-doubt). '
-    'Always include themes; use "general spiritual inquiry" if nothing specific applies.\n\n'
-    'Message: "{text}"'
+    'themes = 2-4 values from EXACTLY this list (use the closest match): '
+    '{canonical_themes}. '
+    'Always include themes; use "restlessness" if nothing specific applies.\n'
+    '{engaged_prior_instruction}'
+    '\nMessage: "{text}"'
+)
+
+_ENGAGED_PRIOR_FIELD = ', "engaged_prior": "ignored|deflected|acknowledged|engaged|deeply_engaged"'
+_ENGAGED_PRIOR_INSTRUCTION = (
+    'engaged_prior = how this message responds to the prior reflective question shown below:\n'
+    '  "ignored" — changed subject entirely\n'
+    '  "deflected" — acknowledged but evaded ("I don\'t know", "let\'s not go there")\n'
+    '  "acknowledged" — brief surface response\n'
+    '  "engaged" — genuine attempt to reflect\n'
+    '  "deeply_engaged" — extended introspective response\n'
+    'Prior reflective question: "{prior_q}"\n'
 )
 
 
-def llm_classify(text: str) -> dict:
-    """Returns {crisis: bool, scope: str|None, themes: str}. Never raises."""
-    prompt = _CLASSIFY_SYSTEM.format(text=text.replace('"', "'")[:800])
+def llm_classify(text: str, prior_question: str | None = None) -> dict:
+    """Returns {crisis: bool, scope: str|None, themes: str, engaged_prior: str|None}.
+
+    prior_question: the reflective question from the previous assistant turn,
+    if one was shown. When provided the classifier also outputs engaged_prior.
+    Never raises.
+    """
+    has_prior = bool(prior_question)
+    engaged_field = _ENGAGED_PRIOR_FIELD if has_prior else ""
+    engaged_instr = (
+        _ENGAGED_PRIOR_INSTRUCTION.format(prior_q=(prior_question or "")[:300])
+        if has_prior else ""
+    )
+    prompt = _CLASSIFY_SYSTEM.format(
+        text=text.replace('"', "'")[:800],
+        canonical_themes=_CANONICAL_THEMES_CSV,
+        engaged_prior_field=engaged_field,
+        engaged_prior_instruction=engaged_instr,
+    )
     try:
         raw = chat(
             [{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=60,
+            max_tokens=80,
         )
         raw = raw.strip()
         s, e = raw.find("{"), raw.rfind("}")
@@ -266,10 +305,11 @@ def llm_classify(text: str) -> dict:
                 "crisis": bool(parsed.get("crisis", False)),
                 "scope": parsed.get("scope") or None,
                 "themes": (parsed.get("themes") or "").strip(),
+                "engaged_prior": parsed.get("engaged_prior") or None,
             }
     except Exception as exc:
         log.warning("llm_classify failed: %s", exc)
-    return {"crisis": False, "scope": None, "themes": ""}
+    return {"crisis": False, "scope": None, "themes": "", "engaged_prior": None}
 
 
 # ---------------------------------------------------------------------------
@@ -281,15 +321,20 @@ class ScreenResult:
     categories: set[str] = field(default_factory=set)
     is_crisis: bool = False
     scope: str | None = None         # "medical" | "legal" | "financial" | None
-    themes: str = ""                 # Gita spiritual themes for retrieval expansion
+    themes: str = ""                 # canonical Gita themes (comma-separated)
+    engaged_prior: str | None = None # engagement signal vs. prior reflective question
 
     @property
     def flagged(self) -> bool:
         return self.is_crisis or self.scope is not None
 
 
-def screen_input(text: str) -> ScreenResult:
-    """Full input safety check. Returns ScreenResult (now also carries themes)."""
+def screen_input(text: str, prior_question: str | None = None) -> ScreenResult:
+    """Full input safety check. Returns ScreenResult.
+
+    prior_question: the reflective question from the previous assistant turn.
+    When provided, the classifier also measures how this message engages it.
+    """
     clean = scrub_injection(text)
 
     if len(clean.replace(" ", "")) < 3:
@@ -298,9 +343,9 @@ def screen_input(text: str) -> ScreenResult:
     kw_cats = keyword_flag(clean)
     needs_llm = bool(kw_cats) or len(clean) > 40
 
-    llm_result: dict = {"crisis": False, "scope": None, "themes": ""}
+    llm_result: dict = {"crisis": False, "scope": None, "themes": "", "engaged_prior": None}
     if needs_llm:
-        llm_result = llm_classify(clean)
+        llm_result = llm_classify(clean, prior_question=prior_question)
 
     is_crisis = ("crisis" in kw_cats) or llm_result["crisis"]
 
@@ -320,6 +365,7 @@ def screen_input(text: str) -> ScreenResult:
         is_crisis=is_crisis,
         scope=scope,
         themes=llm_result.get("themes", ""),
+        engaged_prior=llm_result.get("engaged_prior"),
     )
 
 

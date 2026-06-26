@@ -57,5 +57,34 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     vapid_sub: str = "mailto:admin@example.com"
 
+    # ── Reflective Question Engine ────────────────────────────────────────
+    # Master switch — set RQE_ENABLED=false to disable the whole engine.
+    rqe_enabled: bool = True
+
+    # Minimum turns between consecutive reflective questions in one conversation.
+    rqe_min_turns_between_questions: int = 2
+
+    # When frequency="reduced", require this many turns between questions.
+    rqe_reduced_cap: int = 5
+
+    # Every N assistant turns, base depth increases by 1 (max 3).
+    rqe_depth_turns_per_level: int = 5
+
+    # Embedding similarity threshold for semantic dedup during generation.
+    rqe_dedup_threshold: float = 0.92
+
+    # Exploration factor in candidate ranking (0=pure exploit, 1=pure random).
+    rqe_exploration_factor: float = 0.2
+
+    # After this many shows with engagement_rate below the floor, auto-flag.
+    rqe_demote_min_shows: int = 20
+    rqe_demote_max_rate: float = 0.15
+
+    # How many recently-shown question IDs to remember per user (cross-session).
+    rqe_recently_shown_cap: int = 50
+
+    # Generation targets — questions per (theme, type, depth) cell.
+    rqe_target_per_cell: int = 4
+
 
 settings = Settings()
