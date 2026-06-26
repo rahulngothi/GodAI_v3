@@ -42,5 +42,4 @@ def ensure_reflective_indexes() -> None:
     rq.create_index([("stats.engagement_rate", DESCENDING)])
     rq.create_index([("source", ASCENDING)])
 
-    up = db[USER_PROFILES]
-    up.create_index([("_id", ASCENDING)], unique=True)
+    # user_profiles: _id is the username string; MongoDB creates the _id index automatically.
