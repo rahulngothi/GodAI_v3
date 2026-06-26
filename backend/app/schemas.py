@@ -47,6 +47,7 @@ class ChatSummary(BaseModel):
     persona: str
     language: str
     updated: str
+    preview: str = ""
 
 
 class ChatFull(BaseModel):

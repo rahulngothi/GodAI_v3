@@ -200,16 +200,22 @@ def ask_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
 @app.get("/api/chats", response_model=list[ChatSummary])
 def chats_list(user: str = Depends(get_current_user)):
     docs = get_db()["chats"].find({"user": user}).sort("updated_at", -1).limit(50)
-    return [
-        {
+    result = []
+    for d in docs:
+        preview = ""
+        for t in reversed(d.get("turns", [])):
+            if t.get("role") == "assistant":
+                preview = (t.get("answer") or "").replace("\n", " ").strip()[:80]
+                break
+        result.append({
             "id": str(d["_id"]),
             "title": d.get("title", ""),
             "persona": d.get("persona", "guide"),
             "language": d.get("language", "english"),
             "updated": d["updated_at"].strftime("%Y-%m-%d %H:%M"),
-        }
-        for d in docs
-    ]
+            "preview": preview,
+        })
+    return result
 
 
 @app.get("/api/chats/{chat_id}", response_model=ChatFull)

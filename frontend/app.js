@@ -108,6 +108,7 @@ document.getElementById("loginForm").addEventListener("submit", async (e) => {
     showLogin(false);
     await loadProfileData();
     clearChat();
+    renderDrawer();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.hidden = false;
@@ -134,6 +135,7 @@ async function initAuth() {
     showLogin(false);
     await loadProfileData();
     clearChat();
+    renderDrawer();
   } catch (e) { /* login already shown */ }
 }
 
@@ -221,6 +223,7 @@ function welcomeHTML() {
 function clearChat() {
   history = [];
   chatId = null;
+  setSidebarActive(null);
   stopSpeaking();
   if (currentMode === "converse") {
     chat.innerHTML = welcomeHTML();
@@ -255,23 +258,113 @@ document.getElementById("modebar").addEventListener("click", (e) => {
 });
 document.getElementById("clearBtn").addEventListener("click", () => { clearChat(); if (currentMode === "daily") loadDaily(); });
 
-// ================= conversations drawer (ChatGPT-style) =================
+// ================= persistent sidebar =================
 const drawer = document.getElementById("drawer");
 const drawerBackdrop = document.getElementById("drawerBackdrop");
 const drawerList = document.getElementById("drawerList");
 
+const isDesktop = () => window.innerWidth >= 768;
+
+// Restore collapse state from previous session
+if (localStorage.getItem("dharma_sidebar") === "collapsed") {
+  document.body.classList.add("sidebar-collapsed");
+}
+
+function collapseSidebar() {
+  document.body.classList.add("sidebar-collapsed");
+  localStorage.setItem("dharma_sidebar", "collapsed");
+}
+function expandSidebar() {
+  document.body.classList.remove("sidebar-collapsed");
+  localStorage.setItem("dharma_sidebar", "expanded");
+  renderDrawer();
+}
+
+// histBtn: expand sidebar on desktop, open overlay on mobile
+document.getElementById("histBtn").addEventListener("click", () => {
+  if (!token) { showLogin(true); return; }
+  if (isDesktop()) expandSidebar(); else openDrawer();
+});
+
+// Sidebar toggle button: collapse on desktop, close overlay on mobile
+document.getElementById("sidebarToggle").addEventListener("click", () => {
+  if (isDesktop()) collapseSidebar(); else closeDrawer();
+});
+
+// ---- mobile overlay ----
+let _drawerTrigger = null;
 function openDrawer() {
   if (!token) { showLogin(true); return; }
+  _drawerTrigger = document.activeElement;
   drawer.classList.add("open");
   drawerBackdrop.hidden = false;
   renderDrawer();
+  const first = drawer.querySelector("button:not([disabled])");
+  if (first) first.focus();
 }
 function closeDrawer() {
   drawer.classList.remove("open");
   drawerBackdrop.hidden = true;
+  if (_drawerTrigger) { _drawerTrigger.focus(); _drawerTrigger = null; }
+}
+drawerBackdrop.addEventListener("click", closeDrawer);
+
+// Escape closes mobile overlay
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !isDesktop() && drawer.classList.contains("open")) closeDrawer();
+});
+
+// Focus trap inside drawer when used as mobile overlay
+drawer.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab" || isDesktop()) return;
+  const focusable = [...drawer.querySelectorAll('button:not([disabled]),[href],input,[tabindex]:not([tabindex="-1"])')];
+  if (focusable.length < 2) return;
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+
+document.getElementById("newChatBtn").addEventListener("click", () => {
+  if (!isDesktop()) closeDrawer();
+  if (currentMode !== "converse") setMode("converse"); else clearChat();
+});
+
+// ---- date helpers ----
+function _parseDate(updated) { return new Date(updated.replace(" ", "T")); }
+
+function formatChatDate(updated) {
+  const d = _parseDate(updated);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString())
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === new Date(now - 864e5).toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function groupChats(chats) {
+  const now = new Date();
+  const todayStr = now.toDateString();
+  const yestStr = new Date(now - 864e5).toDateString();
+  const weekAgo = new Date(now - 7 * 864e5);
+  const groups = [
+    { label: "Today", items: [] },
+    { label: "Yesterday", items: [] },
+    { label: "Previous 7 days", items: [] },
+    { label: "Older", items: [] },
+  ];
+  for (const c of chats) {
+    const d = _parseDate(c.updated);
+    if (d.toDateString() === todayStr) groups[0].items.push(c);
+    else if (d.toDateString() === yestStr) groups[1].items.push(c);
+    else if (d >= weekAgo) groups[2].items.push(c);
+    else groups[3].items.push(c);
+  }
+  return groups.filter((g) => g.items.length > 0);
+}
+
+// ---- render sidebar list ----
 async function renderDrawer() {
+  if (!token) return;
   drawerList.innerHTML = `<div class="drawer-empty">…</div>`;
   try {
     const chats = await apiFetch("/api/chats");
@@ -280,34 +373,55 @@ async function renderDrawer() {
       drawerList.innerHTML = `<div class="drawer-empty">No conversations yet.<br/>Ask your first question 🙏</div>`;
       return;
     }
-    chats.forEach((c) => {
-      const item = document.createElement("div");
-      item.className = "chat-item" + (c.id === chatId ? " current" : "");
-      item.innerHTML = `${faceHTML(c.persona)}<div class="chat-item-body">
-          <div class="chat-item-title">${escapeHtml(c.title)}</div>
-          <div class="chat-item-meta">${escapeHtml(personaName(c.persona))} · ${escapeHtml(c.updated)}</div>
-        </div><button class="chat-item-del" title="Delete">🗑</button>`;
-      item.querySelector(".chat-item-del").onclick = async (e) => {
-        e.stopPropagation();
-        await apiFetch(`/api/chats/${c.id}`, { method: "DELETE" });
-        if (c.id === chatId) { clearChat(); }
-        item.remove();
-      };
-      item.onclick = () => { closeDrawer(); loadChat(c.id); };
-      drawerList.appendChild(item);
+    groupChats(chats).forEach(({ label, items }) => {
+      const lbl = document.createElement("div");
+      lbl.className = "drawer-group-label";
+      lbl.textContent = label;
+      drawerList.appendChild(lbl);
+      items.forEach(buildChatItem);
     });
   } catch (e) {
     drawerList.innerHTML = `<div class="drawer-empty">${escapeHtml(e.message)}</div>`;
   }
 }
 
-document.getElementById("histBtn").addEventListener("click", openDrawer);
-document.getElementById("drawerClose").addEventListener("click", closeDrawer);
-drawerBackdrop.addEventListener("click", closeDrawer);
-document.getElementById("newChatBtn").addEventListener("click", () => {
-  closeDrawer();
-  if (currentMode !== "converse") { setMode("converse"); } else { clearChat(); }
-});
+function buildChatItem(c) {
+  const item = document.createElement("div");
+  item.className = "chat-item" + (c.id === chatId ? " current" : "");
+  item.dataset.chatId = c.id;
+  item.setAttribute("role", "listitem");
+  item.innerHTML = `${faceHTML(c.persona)}
+    <div class="chat-item-body">
+      <div class="chat-item-title">${escapeHtml(c.title)}</div>
+      ${c.preview ? `<div class="chat-item-preview">${escapeHtml(c.preview)}</div>` : ""}
+      <div class="chat-item-meta">${escapeHtml(personaName(c.persona))} · ${escapeHtml(formatChatDate(c.updated))}</div>
+    </div>
+    <button class="chat-item-del" title="Delete" aria-label="Delete conversation">🗑</button>`;
+  item.querySelector(".chat-item-del").onclick = async (e) => {
+    e.stopPropagation();
+    await apiFetch(`/api/chats/${c.id}`, { method: "DELETE" });
+    if (c.id === chatId) clearChat();
+    item.remove();
+    // Clean up now-empty group labels
+    drawerList.querySelectorAll(".drawer-group-label").forEach((lbl) => {
+      if (!lbl.nextElementSibling || lbl.nextElementSibling.classList.contains("drawer-group-label"))
+        lbl.remove();
+    });
+  };
+  item.onclick = (e) => {
+    if (e.target.closest(".chat-item-del")) return;
+    if (!isDesktop()) closeDrawer();
+    loadChat(c.id);
+  };
+  drawerList.appendChild(item);
+}
+
+// Update the active highlight without re-fetching the list
+function setSidebarActive(id) {
+  drawerList.querySelectorAll(".chat-item").forEach((el) => {
+    el.classList.toggle("current", el.dataset.chatId === id);
+  });
+}
 
 function forceConverseUI() {
   currentMode = "converse";
@@ -322,6 +436,7 @@ async function loadChat(id) {
     forceConverseUI();
     const c = await apiFetch(`/api/chats/${id}`);
     chatId = c.id;
+    setSidebarActive(chatId);
     currentPersona = c.persona || "guide";
     currentLanguage = c.language || currentLanguage;
     languageSel.value = currentLanguage;
@@ -606,6 +721,7 @@ async function send(question) {
   addUser(question);
   const wrap = addTyping();
   const perspectivesMode = currentMode === "perspectives";
+  const wasNewChat = !chatId;
   try {
     const url = perspectivesMode ? `/api/perspectives` : `/api/ask`;
     const body = perspectivesMode
@@ -621,6 +737,7 @@ async function send(question) {
     } else {
       renderResponse(wrap, data);
       if (data.chat_id) chatId = data.chat_id;
+      if (wasNewChat && chatId) renderDrawer();
       history.push({ role: "user", content: question });
       history.push({ role: "assistant", content: data.answer || "" });
     }
