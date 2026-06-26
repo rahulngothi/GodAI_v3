@@ -4,7 +4,7 @@
     {
       "name": "Dharma AI (FastAPI + frontend)",
       "runtimeExecutable": "/usr/bin/python3",
-      "runtimeArgs": ["-c", "import sys, os; sys.path = [p for p in sys.path if p] + ['/tmp/godai_backend']; [os.environ.setdefault(k.strip(), v.strip()) for line in open('/tmp/godai.env') for k, _, v in [line.partition('=')] if k.strip() and not k.startswith('#')]; import uvicorn; uvicorn.run('app.main:app', host='127.0.0.1', port=8080)"],
+      "runtimeArgs": ["/tmp/godai_run.py"],
       "port": 8080
     },
     {

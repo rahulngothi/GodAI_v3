@@ -5,6 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 import datetime as _dt
@@ -152,6 +153,44 @@ def ask_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
     result["chat_id"] = _save_turns(user, req.chat_id, req, result)
     return result
+
+
+@app.post("/api/ask/stream")
+def ask_stream_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
+    """
+    SSE streaming endpoint.
+
+    Event types the client must handle:
+      data: {"token": "..."}                       — append to streamed answer
+      data: {"replaced": "...", "answer": "..."}   — replace streamed text (lang/mod fix)
+      data: {"done": true, "answer": "...",         — final: render full response card
+             "citations": [...], "followups": [],
+             "persona": "...", "persona_name": "...", "chat_id": "..."}
+
+    Safety: crisis/scope check fires before streaming; lang check + output
+    moderation fire on the completed text and may emit a "replaced" event.
+    """
+    ratelimit.check(user)
+
+    def on_done(result: dict) -> str:
+        return _save_turns(user, req.chat_id, req, result)
+
+    return StreamingResponse(
+        ask_module.ask_stream(
+            req.question,
+            persona_key=req.persona,
+            language=req.language,
+            history=[t.model_dump() for t in req.history],
+            user=user,
+            on_done=on_done,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # ---- saved chats ----
