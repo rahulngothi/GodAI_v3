@@ -39,7 +39,8 @@
     </div>
     <div class="speak-name" id="speakName"></div>
     <div class="eq"><span></span><span></span><span></span><span></span><span></span></div>
-    <div class="speak-hint">tap anywhere to stop</div>
+    <div class="speak-status" id="speakStatus">tap anywhere to stop</div>
+    <div class="speak-hint" id="speakHint"></div>
   </div>
 
   <!-- Conversation mode (talk with the guide) -->
@@ -75,6 +76,7 @@
       </div>
       <div class="topbar-right">
         <select id="language" class="lang-select" aria-label="Language"></select>
+        <button id="autoSpeakBtn" class="icon-chip autospeak-btn" title="Auto-speak replies" aria-label="Toggle auto-speak" aria-pressed="false">🔈</button>
         <button id="clearBtn" class="icon-chip" title="New conversation">↺</button>
         <button id="logoutBtn" class="icon-chip" title="Sign out" hidden>⎋</button>
         <button id="installBtn" class="install-btn" hidden>Install</button>
