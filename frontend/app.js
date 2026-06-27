@@ -312,7 +312,7 @@ function versesHtml(sources) {
     return `
     <div class="verse" id="src-${v.ref.replace(/[^\w]/g, "")}">
       <div class="verse-ref">${escapeHtml(v.ref)} ${badge}</div>
-      <div class="verse-trans">“${escapeHtml(v.translation)}”</div>
+      <div class="verse-trans">"${escapeHtml(v.translation)}"</div>
       ${v.transliteration ? `<div class="verse-sanskrit">${escapeHtml(v.transliteration)}</div>` : ""}
       <div class="verse-meta">${teacher ? "" : "Trans. "}${escapeHtml(v.translator)} · ${escapeHtml(v.source || "Bhagavad Gita")}</div>
     </div>`;
@@ -398,7 +398,7 @@ function renderPerspectives(wrap, data) {
     </div>`).join("");
   wrap.innerHTML = `
     <div class="perspectives-card">
-      <div class="perspectives-q">“${escapeHtml(data.question)}”</div>
+      <div class="perspectives-q">"${escapeHtml(data.question)}"</div>
       <div class="perspectives-sub">Five traditions answer, each from its own scripture</div>
       ${views}
       ${sourcesBlock(data.citations || [], true)}
@@ -424,7 +424,7 @@ function renderDaily(data) {
   wrap.innerHTML = `
     <div class="daily-card">
       <div class="daily-eyebrow">${escapeHtml(data.period)} · ${escapeHtml(data.date)}</div>
-      <div class="daily-verse">“${escapeHtml(data.verse.translation)}”</div>
+      <div class="daily-verse">"${escapeHtml(data.verse.translation)}"</div>
       <a class="cite" data-ref="${escapeHtml(data.verse.ref)}">${escapeHtml(data.verse.ref)}</a>
       <div class="daily-block"><div class="daily-h">Reflection <span class="layer-badge teacher" style="vertical-align:middle">AI interpretation</span></div><p>${escapeHtml(data.reflection)}</p></div>
       <div class="daily-block"><div class="daily-h">${data.period === "morning" ? "Today's practice" : "Evening practice"}</div><p>${escapeHtml(data.practice)}</p></div>
@@ -877,38 +877,38 @@ document.getElementById("convoClose").addEventListener("click", closeConvo);
 async function convoAsk(question) {
   if (convoBusy) return;
   convoBusy = true;
-  convoStatus.textContent = “listening to your heart…”;
-  convoText.textContent = ““” + question + “””;
+  convoStatus.textContent = "listening…";
+  convoText.textContent = "\u201c" + question + "\u201d";
   addUser(question);
   const wrap = addTyping();
   try {
     // Stream in the background; collect the final answer for TTS
-    let finalAnswer = “”;
-    let sseRemainder = “”;
+    let finalAnswer = "";
+    let sseRemainder = "";
     const resp = await fetch(`${API}/api/ask/stream`, {
-      method: “POST”,
-      headers: { “Content-Type”: “application/json”, Authorization: `Bearer ${token}` },
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ question, persona: currentPersona, language: currentLanguage, history: history.slice(-6), chat_id: chatId }),
     });
-    if (!resp.ok) throw new Error(“Something went wrong (“ + resp.status + “)”);
+    if (!resp.ok) throw new Error("Something went wrong (" + resp.status + ")");
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let streamEl = null;
-    let streamBuf = “”;
+    let streamBuf = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       sseRemainder += decoder.decode(value, { stream: true });
-      const lines = sseRemainder.split(“\n”);
+      const lines = sseRemainder.split("\n");
       sseRemainder = lines.pop();
       for (const line of lines) {
-        if (!line.startsWith(“data: “)) continue;
+        if (!line.startsWith("data: ")) continue;
         let evt;
         try { evt = JSON.parse(line.slice(6)); } catch (_) { continue; }
         if (evt.token !== undefined) {
           if (!streamEl) {
-            wrap.innerHTML = `<div class=”answer-card”><div class=”answer-text stream-live”></div></div>`;
-            streamEl = wrap.querySelector(“.answer-text”);
+            wrap.innerHTML = `<div class="answer-card"><div class="answer-text stream-live"></div></div>`;
+            streamEl = wrap.querySelector(".answer-text");
           }
           streamBuf += evt.token;
           streamEl.innerHTML = renderAnswer(streamBuf);
@@ -919,16 +919,16 @@ async function convoAsk(question) {
         } else if (evt.done) {
           renderResponse(wrap, evt);
           if (evt.chat_id) chatId = evt.chat_id;
-          history.push({ role: “user”, content: question });
-          history.push({ role: “assistant”, content: evt.answer || “” });
-          finalAnswer = evt.answer || “”;
+          history.push({ role: "user", content: question });
+          history.push({ role: "assistant", content: evt.answer || "" });
+          finalAnswer = evt.answer || "";
         }
       }
     }
     const spoken = cleanForSpeech(finalAnswer);
     convoText.textContent = spoken;
-    convoStatus.textContent = personaName(currentPersona) + “ is speaking…”;
-    convoOverlay.classList.add(“talking”);
+    convoStatus.textContent = personaName(currentPersona) + " is speaking…";
+    convoOverlay.classList.add("talking");
 
     // Try server TTS first; fall back to browser speakRaw
     let usedServerTTS = false;
@@ -936,8 +936,8 @@ async function convoAsk(question) {
       try {
         _ttsFetch = new AbortController();
         const resp = await fetch(`${API}/api/tts`, {
-          method: “POST”,
-          headers: { “Content-Type”: “application/json”, Authorization: `Bearer ${token}` },
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
           body: JSON.stringify({ text: spoken, language: currentLanguage }),
           signal: _ttsFetch.signal,
         });
@@ -949,24 +949,24 @@ async function convoAsk(question) {
         }
       } catch (e) {
         _ttsFetch = null;
-        if (e.name === “AbortError”) { convoOverlay.classList.remove(“talking”); convoBusy = false; return; }
+        if (e.name === "AbortError") { convoOverlay.classList.remove("talking"); convoBusy = false; return; }
       }
     }
 
     if (!usedServerTTS) {
       await new Promise((resolve) => {
         speakRaw(spoken, convoStage, resolve, (langName) => {
-          convoStatus.dataset.novoice = “1”;
+          convoStatus.dataset.novoice = "1";
           convoStatus.textContent = `⚠ your device has no ${langName} voice — read the reply below, then tap the mic`;
         });
       });
     }
 
-    convoOverlay.classList.remove(“talking”);
-    if (!convoStatus.dataset.novoice) convoStatus.textContent = “tap the mic to reply”;
+    convoOverlay.classList.remove("talking");
+    if (!convoStatus.dataset.novoice) convoStatus.textContent = "tap the mic to reply";
     delete convoStatus.dataset.novoice;
   } catch (e) {
-    wrap.innerHTML = `<div class=”answer-card”><div class=”answer-text” style=”color:#b8410e”>🙏 ${escapeHtml(e.message)}</div></div>`;
+    wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">🙏 ${escapeHtml(e.message)}</div></div>`;
     convoStatus.textContent = e.message;
   } finally {
     convoBusy = false;
