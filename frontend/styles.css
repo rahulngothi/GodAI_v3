@@ -379,7 +379,11 @@ body { font-family: var(--sans); color: var(--ink); background: var(--night); ov
 .ring { position: absolute; inset: 22px; border-radius: 50%; border: 2px solid rgba(232,176,75,.55); opacity: 0; }
 .speak-stage.talking .ring { animation: ripple 2.4s infinite ease-out; }
 .speak-stage.talking .ring.r2 { animation-delay: .6s; } .speak-stage.talking .ring.r3 { animation-delay: 1.2s; }
+/* Loading state — slow pulse while waiting for server TTS response */
+.speak-stage.loading .ring { animation: ripple-slow 3.2s infinite ease-in-out; border-color: rgba(232,176,75,.35); }
+.speak-stage.loading .ring.r2 { animation-delay: 1.1s; } .speak-stage.loading .ring.r3 { animation-delay: 2.2s; }
 @keyframes ripple { from { transform: scale(.7); opacity: .85; } to { transform: scale(1.22); opacity: 0; } }
+@keyframes ripple-slow { 0%, 100% { transform: scale(.82); opacity: .35; } 50% { transform: scale(1.05); opacity: .7; } }
 .speak-face { width: 152px; height: 152px; border-radius: 50%; overflow: hidden; box-shadow: var(--glow); z-index: 1; }
 .speak-face .avatar, .speak-face .avatar img, .speak-face .face-svg { width: 100%; height: 100%; display: block; }
 .speak-name { font-family: var(--serif); font-size: 24px; color: #fff; text-align: center; }

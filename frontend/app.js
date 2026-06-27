@@ -312,7 +312,7 @@ function versesHtml(sources) {
     return `
     <div class="verse" id="src-${v.ref.replace(/[^\w]/g, "")}">
       <div class="verse-ref">${escapeHtml(v.ref)} ${badge}</div>
-      <div class="verse-trans">“${escapeHtml(v.translation)}”</div>
+      <div class="verse-trans">"${escapeHtml(v.translation)}"</div>
       ${v.transliteration ? `<div class="verse-sanskrit">${escapeHtml(v.transliteration)}</div>` : ""}
       <div class="verse-meta">${teacher ? "" : "Trans. "}${escapeHtml(v.translator)} · ${escapeHtml(v.source || "Bhagavad Gita")}</div>
     </div>`;
@@ -398,7 +398,7 @@ function renderPerspectives(wrap, data) {
     </div>`).join("");
   wrap.innerHTML = `
     <div class="perspectives-card">
-      <div class="perspectives-q">“${escapeHtml(data.question)}”</div>
+      <div class="perspectives-q">"${escapeHtml(data.question)}"</div>
       <div class="perspectives-sub">Five traditions answer, each from its own scripture</div>
       ${views}
       ${sourcesBlock(data.citations || [], true)}
@@ -424,7 +424,7 @@ function renderDaily(data) {
   wrap.innerHTML = `
     <div class="daily-card">
       <div class="daily-eyebrow">${escapeHtml(data.period)} · ${escapeHtml(data.date)}</div>
-      <div class="daily-verse">“${escapeHtml(data.verse.translation)}”</div>
+      <div class="daily-verse">"${escapeHtml(data.verse.translation)}"</div>
       <a class="cite" data-ref="${escapeHtml(data.verse.ref)}">${escapeHtml(data.verse.ref)}</a>
       <div class="daily-block"><div class="daily-h">Reflection <span class="layer-badge teacher" style="vertical-align:middle">AI interpretation</span></div><p>${escapeHtml(data.reflection)}</p></div>
       <div class="daily-block"><div class="daily-h">${data.period === "morning" ? "Today's practice" : "Evening practice"}</div><p>${escapeHtml(data.practice)}</p></div>
@@ -578,6 +578,7 @@ async function send(question) {
   question = (question || input.value).trim();
   if (!question) return;
   if (!token) { showLogin(true); return; }
+  stopSpeaking();  // cancel any audio playing when user sends a new message
   input.value = ""; input.style.height = "auto";
   addUser(question);
   const wrap = addTyping();
@@ -648,25 +649,160 @@ async function loadJournal() {
   } catch (e) { /* quiet */ }
 }
 
-// ================= voice: speech-to-text =================
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (SR) {
-  const rec = new SR();
-  rec.interimResults = false;
-  let listening = false;
-  micBtn.onclick = () => { if (listening) { rec.stop(); return; } rec.lang = bcp47(); rec.start(); };
-  rec.onstart = () => { listening = true; micBtn.classList.add("listening"); };
-  rec.onend = () => { listening = false; micBtn.classList.remove("listening"); };
-  rec.onresult = (ev) => { const t = ev.results[0][0].transcript; input.value = t; send(t); };
-  rec.onerror = () => { listening = false; micBtn.classList.remove("listening"); };
-} else {
-  micBtn.title = "Voice input needs Chrome/Safari over HTTPS";
-  micBtn.style.opacity = 0.4;
+// ================= voice: speech-to-text (Whisper) =================
+// Records via MediaRecorder, POSTs to /api/stt (server-side Whisper).
+// Falls back to browser Web Speech API if MediaRecorder is unavailable.
+
+function _whisperMic(btn, onResult, onStatus) {
+  if (!navigator.mediaDevices || !window.MediaRecorder) return false;
+
+  let recorder = null;
+  let chunks = [];
+  let active = false;
+  let autoStopTimer = null;
+  const origLabel = btn.textContent;
+
+  function _stop() {
+    if (autoStopTimer) { clearTimeout(autoStopTimer); autoStopTimer = null; }
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  }
+
+  btn.addEventListener("click", async () => {
+    if (active) { _stop(); return; }
+
+    active = true;
+    chunks = [];
+    btn.classList.add("listening");
+    btn.textContent = "⏹ Done";
+    if (onStatus) onStatus("listening… tap Done when finished");
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      active = false;
+      btn.classList.remove("listening");
+      btn.textContent = origLabel;
+      if (onStatus) onStatus("mic access denied");
+      return;
+    }
+
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/webm")
+      ? "audio/webm"
+      : "";
+    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    // collect data every 250 ms so chunks are never empty on short clips
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      btn.classList.remove("listening");
+      btn.textContent = origLabel;
+      active = false;
+      if (!chunks.length) return;
+      if (onStatus) onStatus("transcribing…");
+      btn.disabled = true;
+
+      try {
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        const form = new FormData();
+        form.append("audio", blob, "audio.webm");
+        form.append("language", "hi");
+        const resp = await fetch(`${API}/api/stt`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.text) onResult(data.text);
+          else if (onStatus) onStatus("nothing heard — try again");
+        } else {
+          if (onStatus) onStatus("couldn't hear — try again");
+        }
+      } catch (e) {
+        if (onStatus) onStatus("couldn't hear — try again");
+      } finally {
+        btn.disabled = false;
+        if (onStatus) onStatus("");
+      }
+    };
+    recorder.start(250);  // fire ondataavailable every 250 ms
+    // Auto-stop after 15 s so the user doesn't have to remember to tap Done
+    autoStopTimer = setTimeout(_stop, 15000);
+  });
+
+  return true;
+}
+
+// Main chat mic
+const _mainMicReady = _whisperMic(
+  micBtn,
+  (text) => { input.value = text; send(text); },
+  null,
+);
+if (!_mainMicReady) {
+  // Browser STT fallback
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    const rec = new SR();
+    rec.interimResults = false;
+    let listening = false;
+    micBtn.onclick = () => { if (listening) { rec.stop(); return; } rec.lang = bcp47(); rec.start(); };
+    rec.onstart = () => { listening = true; micBtn.classList.add("listening"); };
+    rec.onend = () => { listening = false; micBtn.classList.remove("listening"); };
+    rec.onresult = (ev) => { const t = ev.results[0][0].transcript; input.value = t; send(t); };
+    rec.onerror = () => { listening = false; micBtn.classList.remove("listening"); };
+  } else {
+    micBtn.title = "Voice input needs mic permission";
+    micBtn.style.opacity = 0.4;
+  }
 }
 
 // ================= voice: talking avatar (TTS) =================
 let speakingBtn = null;
 let activeStage = null;
+
+// Server-side audio playback — uses a plain <audio> element (reliable MP3 support).
+let _currentAudio = null;  // current HTMLAudioElement
+let _currentBlobUrl = null;
+let _ttsFetch = null;      // AbortController for the in-flight /api/tts fetch
+
+// Play raw MP3 bytes returned by /api/tts.
+// Returns a Promise that resolves when playback ends or rejects on error.
+function _playServerAudio(arrayBuffer) {
+  // Clean up any previous audio element
+  if (_currentAudio) {
+    _currentAudio.pause();
+    _currentAudio.src = "";
+    _currentAudio = null;
+  }
+  if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
+
+  const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
+  _currentBlobUrl = URL.createObjectURL(blob);
+  _currentAudio = new Audio(_currentBlobUrl);
+  _currentAudio.volume = 1.0;
+
+  return new Promise((resolve, reject) => {
+    _currentAudio.onended = () => {
+      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
+      _currentAudio = null;
+      resolve();
+    };
+    _currentAudio.onerror = () => {
+      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
+      _currentAudio = null;
+      reject(new Error("audio playback error"));
+    };
+    _currentAudio.play().catch((err) => {
+      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
+      _currentAudio = null;
+      reject(err);
+    });
+  });
+}
 
 // Voices load ASYNC in browsers — getVoices() is often empty on first call.
 let _voicesPromise = null;
@@ -733,25 +869,69 @@ function speakRaw(text, stageEl, onend, onnovoice) {
 }
 
 function stopSpeaking() {
+  // Cancel any in-flight server TTS fetch
+  if (_ttsFetch) { _ttsFetch.abort(); _ttsFetch = null; }
+  // Stop <audio> element playback
+  if (_currentAudio) { _currentAudio.pause(); _currentAudio.src = ""; _currentAudio = null; }
+  if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
+  // Stop browser speech synthesis
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
-  if (activeStage) { activeStage.classList.remove("talking"); activeStage = null; }
+  if (activeStage) { activeStage.classList.remove("talking", "loading"); activeStage = null; }
   speakOverlay.hidden = true;
   if (speakingBtn) { speakingBtn.classList.remove("speaking"); speakingBtn.textContent = "🔊 Listen"; speakingBtn = null; }
 }
 
-function speak(text, btn, personaKey) {
-  if (!("speechSynthesis" in window)) return;
-  if (speakingBtn) { stopSpeaking(); return; }
+// speak() — primary entry point.
+// 1. Tries POST /api/tts (HF indic-parler-tts — authentic Indian voice).
+// 2. On 503 / network error falls back to browser Web Speech API.
+// Calling speak() while already speaking stops playback (toggle).
+async function speak(text, btn, personaKey) {
+  if (speakingBtn || _ttsFetch) { stopSpeaking(); return; }
   const clean = cleanForSpeech(text);
   if (!clean) return;
 
   document.getElementById("speakFace").innerHTML = faceHTML(personaKey);
   document.getElementById("speakName").textContent = personaKey === "guide" ? "Dharma Guide" : personaName(personaKey);
   speakOverlay.hidden = false;
+  const stage = document.getElementById("speakStage");
+  stage.classList.add("loading");  // slow-pulse rings while fetching
 
   speakingBtn = btn;
   if (btn) { btn.classList.add("speaking"); btn.textContent = "⏹ Stop"; }
-  speakRaw(clean, document.getElementById("speakStage"), () => { stopSpeaking(); }, (langName) => {
+
+  // ── Try server TTS ──────────────────────────────────────────────────────
+  if (token) {
+    try {
+      _ttsFetch = new AbortController();
+      const resp = await fetch(`${API}/api/tts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ text: clean, language: currentLanguage }),
+        signal: _ttsFetch.signal,
+      });
+      _ttsFetch = null;
+
+      if (resp.ok) {
+        const buf = await resp.arrayBuffer();
+        stage.classList.remove("loading");
+        stage.classList.add("talking");
+        activeStage = stage;
+        await _playServerAudio(buf);
+        stopSpeaking();
+        return;
+      }
+
+      if (resp.status !== 503) throw new Error(`TTS ${resp.status}`);
+    } catch (e) {
+      _ttsFetch = null;
+      if (e.name === "AbortError") return;
+      // fall through to browser
+    }
+  }
+
+  // ── Browser Web Speech API fallback ────────────────────────────────────
+  stage.classList.remove("loading");
+  speakRaw(clean, stage, () => { stopSpeaking(); }, (langName) => {
     document.querySelector(".speak-hint").textContent = `your device has no ${langName} voice installed — reply shown as text in the chat 🙏`;
   });
 }
@@ -787,38 +967,38 @@ document.getElementById("convoClose").addEventListener("click", closeConvo);
 async function convoAsk(question) {
   if (convoBusy) return;
   convoBusy = true;
-  convoStatus.textContent = “listening to your heart…”;
-  convoText.textContent = ““” + question + “””;
+  convoStatus.textContent = "listening…";
+  convoText.textContent = "\u201c" + question + "\u201d";
   addUser(question);
   const wrap = addTyping();
   try {
     // Stream in the background; collect the final answer for TTS
-    let finalAnswer = “”;
-    let sseRemainder = “”;
+    let finalAnswer = "";
+    let sseRemainder = "";
     const resp = await fetch(`${API}/api/ask/stream`, {
-      method: “POST”,
-      headers: { “Content-Type”: “application/json”, Authorization: `Bearer ${token}` },
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       body: JSON.stringify({ question, persona: currentPersona, language: currentLanguage, history: history.slice(-6), chat_id: chatId }),
     });
-    if (!resp.ok) throw new Error(“Something went wrong (“ + resp.status + “)”);
+    if (!resp.ok) throw new Error("Something went wrong (" + resp.status + ")");
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let streamEl = null;
-    let streamBuf = “”;
+    let streamBuf = "";
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       sseRemainder += decoder.decode(value, { stream: true });
-      const lines = sseRemainder.split(“\n”);
+      const lines = sseRemainder.split("\n");
       sseRemainder = lines.pop();
       for (const line of lines) {
-        if (!line.startsWith(“data: “)) continue;
+        if (!line.startsWith("data: ")) continue;
         let evt;
         try { evt = JSON.parse(line.slice(6)); } catch (_) { continue; }
         if (evt.token !== undefined) {
           if (!streamEl) {
-            wrap.innerHTML = `<div class=”answer-card”><div class=”answer-text stream-live”></div></div>`;
-            streamEl = wrap.querySelector(“.answer-text”);
+            wrap.innerHTML = `<div class="answer-card"><div class="answer-text stream-live"></div></div>`;
+            streamEl = wrap.querySelector(".answer-text");
           }
           streamBuf += evt.token;
           streamEl.innerHTML = renderAnswer(streamBuf);
@@ -829,51 +1009,87 @@ async function convoAsk(question) {
         } else if (evt.done) {
           renderResponse(wrap, evt);
           if (evt.chat_id) chatId = evt.chat_id;
-          history.push({ role: “user”, content: question });
-          history.push({ role: “assistant”, content: evt.answer || “” });
-          finalAnswer = evt.answer || “”;
+          history.push({ role: "user", content: question });
+          history.push({ role: "assistant", content: evt.answer || "" });
+          finalAnswer = evt.answer || "";
         }
       }
     }
     const spoken = cleanForSpeech(finalAnswer);
     convoText.textContent = spoken;
-    convoStatus.textContent = personaName(currentPersona) + “ is speaking…”;
-    convoOverlay.classList.add(“talking”);
-    speakRaw(spoken, convoStage, () => {
-      convoOverlay.classList.remove(“talking”);
-      if (!convoStatus.dataset.novoice) convoStatus.textContent = “tap the mic to reply”;
-      delete convoStatus.dataset.novoice;
-    }, (langName) => {
-      convoStatus.dataset.novoice = “1”;
-      convoStatus.textContent = `⚠ your device has no ${langName} voice — read the reply below, then tap the mic`;
-    });
+    convoStatus.textContent = personaName(currentPersona) + " is speaking…";
+    convoOverlay.classList.add("talking");
+
+    // Try server TTS first; fall back to browser speakRaw
+    let usedServerTTS = false;
+    if (token && spoken) {
+      try {
+        _ttsFetch = new AbortController();
+        const resp = await fetch(`${API}/api/tts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ text: spoken, language: currentLanguage }),
+          signal: _ttsFetch.signal,
+        });
+        _ttsFetch = null;
+        if (resp.ok) {
+          const buf = await resp.arrayBuffer();
+          await _playServerAudio(buf);
+          usedServerTTS = true;
+        }
+      } catch (e) {
+        _ttsFetch = null;
+        if (e.name === "AbortError") { convoOverlay.classList.remove("talking"); convoBusy = false; return; }
+      }
+    }
+
+    if (!usedServerTTS) {
+      await new Promise((resolve) => {
+        speakRaw(spoken, convoStage, resolve, (langName) => {
+          convoStatus.dataset.novoice = "1";
+          convoStatus.textContent = `⚠ your device has no ${langName} voice — read the reply below, then tap the mic`;
+        });
+      });
+    }
+
+    convoOverlay.classList.remove("talking");
+    if (!convoStatus.dataset.novoice) convoStatus.textContent = "tap the mic to reply";
+    delete convoStatus.dataset.novoice;
   } catch (e) {
-    wrap.innerHTML = `<div class=”answer-card”><div class=”answer-text” style=”color:#b8410e”>🙏 ${escapeHtml(e.message)}</div></div>`;
+    wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">🙏 ${escapeHtml(e.message)}</div></div>`;
     convoStatus.textContent = e.message;
   } finally {
     convoBusy = false;
   }
 }
 
-// dedicated recognizer for conversation mode
-if (SR) {
-  const crec = new SR();
-  crec.interimResults = false;
-  let clistening = false;
-  convoMic.onclick = () => {
-    if (clistening) { crec.stop(); return; }
-    stopSpeaking();
-    convoOverlay.classList.remove("talking");
-    crec.lang = bcp47();
-    try { crec.start(); } catch (e) {}
-  };
-  crec.onstart = () => { clistening = true; convoMic.classList.add("listening"); convoStatus.textContent = "listening…"; };
-  crec.onend = () => { clistening = false; convoMic.classList.remove("listening"); };
-  crec.onresult = (ev) => convoAsk(ev.results[0][0].transcript);
-  crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn't catch that — tap the mic again"; };
-} else {
-  convoMic.style.opacity = 0.4;
-  convoStatus.textContent = "voice needs Chrome/Safari over HTTPS";
+// Conversation overlay mic — Whisper with browser SR fallback
+const _convoMicReady = _whisperMic(
+  convoMic,
+  (text) => { stopSpeaking(); convoOverlay.classList.remove("talking"); convoAsk(text); },
+  (msg) => { convoStatus.textContent = msg; },
+);
+if (!_convoMicReady) {
+  const SR2 = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR2) {
+    const crec = new SR2();
+    crec.interimResults = false;
+    let clistening = false;
+    convoMic.onclick = () => {
+      if (clistening) { crec.stop(); return; }
+      stopSpeaking();
+      convoOverlay.classList.remove("talking");
+      crec.lang = bcp47();
+      try { crec.start(); } catch (e) {}
+    };
+    crec.onstart = () => { clistening = true; convoMic.classList.add("listening"); convoStatus.textContent = "listening…"; };
+    crec.onend = () => { clistening = false; convoMic.classList.remove("listening"); };
+    crec.onresult = (ev) => convoAsk(ev.results[0][0].transcript);
+    crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn't catch that — tap the mic again"; };
+  } else {
+    convoMic.style.opacity = 0.4;
+    convoStatus.textContent = "voice needs mic permission";
+  }
 }
 
 // open conversation mode by tapping the big welcome avatar or the talk chip
@@ -887,6 +1103,11 @@ const installBtn = document.getElementById("installBtn");
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredPrompt = e; installBtn.hidden = false; });
 installBtn.onclick = async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; installBtn.hidden = true; };
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+
+// ================= audio unlock (mobile autoplay gate) =================
+// Browsers require a user gesture before audio can play.
+// We capture the first tap/click anywhere on the page to unlock AudioContext.
+// Auto-speak then fires without needing another gesture.
 
 // ================= init =================
 document.getElementById("loginFaces").innerHTML =

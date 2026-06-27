@@ -57,6 +57,40 @@ class Settings(BaseSettings):
     vapid_private_key: str = ""
     vapid_sub: str = "mailto:admin@example.com"
 
+    # ── Voice / TTS ───────────────────────────────────────────────────────
+    # TTS_BACKEND controls which engine is tried first.
+    # Fallback chain is tried left-to-right; "browser" signals the client.
+    # Supported names: hf_indic, browser
+    tts_backend: str = "edge_tts"
+    tts_fallback_order: str = "edge_tts,browser"
+
+    # HuggingFace Inference API — required for hf_indic backend.
+    # Get a free token at huggingface.co/settings/tokens (read scope is enough).
+    hf_api_token: str = ""
+    hf_tts_model_url: str = ""  # empty → uses ai4bharat/indic-parler-tts default
+
+    # Audio cache — keyed by hash(text + language + profile + backend).
+    tts_cache_enabled: bool = True
+    tts_cache_max_items: int = 256
+
+    # "drop" removes [BG 2.47] from audio (visual tag stays on screen).
+    # "speak" expands it to "chapter 2, verse 47".
+    tts_citation_mode: str = "drop"
+
+    # Voice character — edit these to tune the voice without touching code.
+    # browser_rate/pitch: 0.82/0.78 = calm, deep, meditative (not dramatic).
+    tts_browser_rate: float = 0.82
+    tts_browser_pitch: float = 0.78
+    tts_voice_description: str = (
+        "A calm, warm, middle-aged Indian man speaking slowly and gently, "
+        "with a serene, meditative, reverent tone. "
+        "The voice is clear and close-sounding with no background noise."
+    )
+
+    # Whisper model for STT. Options: tiny, base, small, medium, large-v3
+    # small is the recommended balance of speed and Hindi accuracy on CPU.
+    whisper_model: str = "small"
+
     # ── Reflective Question Engine ────────────────────────────────────────
     # Master switch — set RQE_ENABLED=false to disable the whole engine.
     rqe_enabled: bool = True
