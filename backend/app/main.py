@@ -5,7 +5,7 @@ from pathlib import Path
 
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -147,6 +147,27 @@ async def synthesize_speech(body: TTSRequest, user: str = Depends(get_current_us
 
     # All server backends failed — client falls back to Web Speech API
     return JSONResponse({"fallback": "browser"}, status_code=503)
+
+
+@app.post("/api/stt")
+async def transcribe_speech(
+    audio: UploadFile = File(...),
+    language: str = Form(default=""),
+    user: str = Depends(get_current_user),
+):
+    """Transcribe voice audio (WebM/MP4/WAV) using Whisper.
+    Returns {"text": str, "language": str} — language is auto-detected.
+    """
+    from .stt import transcribe
+    data = await audio.read()
+    if not data:
+        raise HTTPException(400, "Empty audio file")
+    try:
+        result = await run_in_threadpool(transcribe, data, language)
+    except Exception as exc:
+        log.warning("Whisper transcription failed: %s", exc)
+        raise HTTPException(500, f"Transcription failed: {exc}") from exc
+    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────

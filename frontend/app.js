@@ -649,69 +649,148 @@ async function loadJournal() {
   } catch (e) { /* quiet */ }
 }
 
-// ================= voice: speech-to-text =================
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-if (SR) {
-  const rec = new SR();
-  rec.interimResults = false;
-  let listening = false;
-  micBtn.onclick = () => { if (listening) { rec.stop(); return; } rec.lang = bcp47(); rec.start(); };
-  rec.onstart = () => { listening = true; micBtn.classList.add("listening"); };
-  rec.onend = () => { listening = false; micBtn.classList.remove("listening"); };
-  rec.onresult = (ev) => { const t = ev.results[0][0].transcript; input.value = t; send(t); };
-  rec.onerror = () => { listening = false; micBtn.classList.remove("listening"); };
-} else {
-  micBtn.title = "Voice input needs Chrome/Safari over HTTPS";
-  micBtn.style.opacity = 0.4;
+// ================= voice: speech-to-text (Whisper) =================
+// Records via MediaRecorder, POSTs to /api/stt (server-side Whisper).
+// Falls back to browser Web Speech API if MediaRecorder is unavailable.
+
+function _whisperMic(btn, onResult, onStatus) {
+  if (!navigator.mediaDevices || !window.MediaRecorder) return false;
+
+  let recorder = null;
+  let chunks = [];
+  let active = false;
+
+  btn.addEventListener("click", async () => {
+    if (active) {
+      // Second click — stop recording
+      recorder && recorder.stop();
+      return;
+    }
+    active = true;
+    chunks = [];
+    btn.classList.add("listening");
+    if (onStatus) onStatus("listening…");
+
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      active = false;
+      btn.classList.remove("listening");
+      if (onStatus) onStatus("mic access denied");
+      return;
+    }
+
+    // Prefer WebM Opus (Chrome); fall back to whatever the browser supports
+    const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+      ? "audio/webm;codecs=opus"
+      : MediaRecorder.isTypeSupported("audio/webm")
+      ? "audio/webm"
+      : "";
+    recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach((t) => t.stop());
+      btn.classList.remove("listening");
+      active = false;
+      if (!chunks.length) return;
+      if (onStatus) onStatus("transcribing…");
+      btn.disabled = true;
+
+      try {
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        const form = new FormData();
+        form.append("audio", blob, "audio.webm");
+        form.append("language", currentLanguage === "hindi" ? "hi" : "en");
+        const resp = await fetch(`${API}/api/stt`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+          body: form,
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.text) onResult(data.text);
+        } else {
+          if (onStatus) onStatus("couldn't hear — try again");
+        }
+      } catch (e) {
+        if (onStatus) onStatus("couldn't hear — try again");
+      } finally {
+        btn.disabled = false;
+        if (onStatus) onStatus("");
+      }
+    };
+    recorder.start();
+  });
+
+  return true;
+}
+
+// Main chat mic
+const _mainMicReady = _whisperMic(
+  micBtn,
+  (text) => { input.value = text; send(text); },
+  null,
+);
+if (!_mainMicReady) {
+  // Browser STT fallback
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR) {
+    const rec = new SR();
+    rec.interimResults = false;
+    let listening = false;
+    micBtn.onclick = () => { if (listening) { rec.stop(); return; } rec.lang = bcp47(); rec.start(); };
+    rec.onstart = () => { listening = true; micBtn.classList.add("listening"); };
+    rec.onend = () => { listening = false; micBtn.classList.remove("listening"); };
+    rec.onresult = (ev) => { const t = ev.results[0][0].transcript; input.value = t; send(t); };
+    rec.onerror = () => { listening = false; micBtn.classList.remove("listening"); };
+  } else {
+    micBtn.title = "Voice input needs mic permission";
+    micBtn.style.opacity = 0.4;
+  }
 }
 
 // ================= voice: talking avatar (TTS) =================
 let speakingBtn = null;
 let activeStage = null;
 
-// Web Audio API — used to play server-side audio (HF indic-parler-tts)
-let _audioCtx = null;
-let _audioSource = null;   // current AudioBufferSourceNode
+// Server-side audio playback — uses a plain <audio> element (reliable MP3 support).
+let _currentAudio = null;  // current HTMLAudioElement
+let _currentBlobUrl = null;
 let _ttsFetch = null;      // AbortController for the in-flight /api/tts fetch
 
-// One-time mobile audio unlock: browsers block audio until a user gesture.
-// We set this flag on the first click anywhere, then auto-speak can fire.
-let audioUnlocked = false;
+// Play raw MP3 bytes returned by /api/tts.
+// Returns a Promise that resolves when playback ends or rejects on error.
+function _playServerAudio(arrayBuffer) {
+  // Clean up any previous audio element
+  if (_currentAudio) {
+    _currentAudio.pause();
+    _currentAudio.src = "";
+    _currentAudio = null;
+  }
+  if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
 
+  const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
+  _currentBlobUrl = URL.createObjectURL(blob);
+  _currentAudio = new Audio(_currentBlobUrl);
+  _currentAudio.volume = 1.0;
 
-function _getAudioCtx() {
-  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  return _audioCtx;
-}
-
-// Play a silent buffer to unlock AudioContext after the first gesture.
-function _unlockAudio() {
-  if (audioUnlocked) return;
-  try {
-    const ctx = _getAudioCtx();
-    if (ctx.state === "suspended") ctx.resume();
-    const buf = ctx.createBuffer(1, 1, 22050);
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(ctx.destination);
-    src.start(0);
-    audioUnlocked = true;
-  } catch (_) {}
-}
-
-// Decode + play raw audio bytes (WAV/FLAC/MP3 — whatever the backend returns).
-// Returns a Promise that resolves when playback ends.
-async function _playAudioBuffer(arrayBuffer) {
-  const ctx = _getAudioCtx();
-  if (ctx.state === "suspended") await ctx.resume();
-  const decoded = await ctx.decodeAudioData(arrayBuffer);
-  if (_audioSource) { try { _audioSource.stop(); } catch (_) {} }
-  _audioSource = ctx.createBufferSource();
-  _audioSource.buffer = decoded;
-  _audioSource.connect(ctx.destination);
-  return new Promise((resolve) => {
-    _audioSource.onended = resolve;
-    _audioSource.start(0);
+  return new Promise((resolve, reject) => {
+    _currentAudio.onended = () => {
+      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
+      _currentAudio = null;
+      resolve();
+    };
+    _currentAudio.onerror = () => {
+      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
+      _currentAudio = null;
+      reject(new Error("audio playback error"));
+    };
+    _currentAudio.play().catch((err) => {
+      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
+      _currentAudio = null;
+      reject(err);
+    });
   });
 }
 
@@ -782,8 +861,9 @@ function speakRaw(text, stageEl, onend, onnovoice) {
 function stopSpeaking() {
   // Cancel any in-flight server TTS fetch
   if (_ttsFetch) { _ttsFetch.abort(); _ttsFetch = null; }
-  // Stop Web Audio playback
-  if (_audioSource) { try { _audioSource.stop(); } catch (_) {} _audioSource = null; }
+  // Stop <audio> element playback
+  if (_currentAudio) { _currentAudio.pause(); _currentAudio.src = ""; _currentAudio = null; }
+  if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
   // Stop browser speech synthesis
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   if (activeStage) { activeStage.classList.remove("talking", "loading"); activeStage = null; }
@@ -826,7 +906,7 @@ async function speak(text, btn, personaKey) {
         stage.classList.remove("loading");
         stage.classList.add("talking");
         activeStage = stage;
-        await _playAudioBuffer(buf);
+        await _playServerAudio(buf);
         stopSpeaking();
         return;
       }
@@ -944,7 +1024,7 @@ async function convoAsk(question) {
         _ttsFetch = null;
         if (resp.ok) {
           const buf = await resp.arrayBuffer();
-          await _playAudioBuffer(buf);
+          await _playServerAudio(buf);
           usedServerTTS = true;
         }
       } catch (e) {
@@ -973,25 +1053,33 @@ async function convoAsk(question) {
   }
 }
 
-// dedicated recognizer for conversation mode
-if (SR) {
-  const crec = new SR();
-  crec.interimResults = false;
-  let clistening = false;
-  convoMic.onclick = () => {
-    if (clistening) { crec.stop(); return; }
-    stopSpeaking();
-    convoOverlay.classList.remove("talking");
-    crec.lang = bcp47();
-    try { crec.start(); } catch (e) {}
-  };
-  crec.onstart = () => { clistening = true; convoMic.classList.add("listening"); convoStatus.textContent = "listening…"; };
-  crec.onend = () => { clistening = false; convoMic.classList.remove("listening"); };
-  crec.onresult = (ev) => convoAsk(ev.results[0][0].transcript);
-  crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn't catch that — tap the mic again"; };
-} else {
-  convoMic.style.opacity = 0.4;
-  convoStatus.textContent = "voice needs Chrome/Safari over HTTPS";
+// Conversation overlay mic — Whisper with browser SR fallback
+const _convoMicReady = _whisperMic(
+  convoMic,
+  (text) => { stopSpeaking(); convoOverlay.classList.remove("talking"); convoAsk(text); },
+  (msg) => { convoStatus.textContent = msg; },
+);
+if (!_convoMicReady) {
+  const SR2 = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SR2) {
+    const crec = new SR2();
+    crec.interimResults = false;
+    let clistening = false;
+    convoMic.onclick = () => {
+      if (clistening) { crec.stop(); return; }
+      stopSpeaking();
+      convoOverlay.classList.remove("talking");
+      crec.lang = bcp47();
+      try { crec.start(); } catch (e) {}
+    };
+    crec.onstart = () => { clistening = true; convoMic.classList.add("listening"); convoStatus.textContent = "listening…"; };
+    crec.onend = () => { clistening = false; convoMic.classList.remove("listening"); };
+    crec.onresult = (ev) => convoAsk(ev.results[0][0].transcript);
+    crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn't catch that — tap the mic again"; };
+  } else {
+    convoMic.style.opacity = 0.4;
+    convoStatus.textContent = "voice needs mic permission";
+  }
 }
 
 // open conversation mode by tapping the big welcome avatar or the talk chip
@@ -1010,8 +1098,6 @@ if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").cat
 // Browsers require a user gesture before audio can play.
 // We capture the first tap/click anywhere on the page to unlock AudioContext.
 // Auto-speak then fires without needing another gesture.
-document.addEventListener("click", () => { _unlockAudio(); }, { passive: true });
-document.addEventListener("touchstart", () => { _unlockAudio(); }, { passive: true });
 
 // ================= init =================
 document.getElementById("loginFaces").innerHTML =
