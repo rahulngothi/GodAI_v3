@@ -370,7 +370,11 @@ def ask(
 
     # Theme-expanded retrieval (themes come free from the safety classifier call).
     retrieval_query = f"{sr.themes} — {safe_question}" if sr.themes else safe_question
-    verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
+    try:
+        verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
+    except Exception as _rag_err:
+        log.warning("RAG retrieval failed: %s — responding without citations", _rag_err)
+        verses = []
 
     # ── Reflective question engine ─────────────────────────────────────────
     turn_count = sum(1 for t in (history or []) if t.get("role") == "assistant")
@@ -518,7 +522,11 @@ def ask_stream(
 
     # Theme-expanded retrieval (themes come free from the safety classifier call).
     retrieval_query = f"{sr.themes} — {safe_question}" if sr.themes else safe_question
-    verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
+    try:
+        verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
+    except Exception as _rag_err:
+        log.warning("RAG retrieval failed: %s — responding without citations", _rag_err)
+        verses = []
 
     # ── Reflective question engine ─────────────────────────────────────────
     turn_count = sum(1 for t in (history or []) if t.get("role") == "assistant")
