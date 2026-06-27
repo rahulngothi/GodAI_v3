@@ -10,11 +10,13 @@ Provider defaults (used when LLM_MODEL / LLM_BASE_URL are not explicitly set):
   nvidia  → integrate.api.nvidia.com/v1  +  moonshotai/kimi-k2.6
   gemini  → generativelanguage.googleapis.com/v1beta/openai  +  gemini-2.5-flash
   sarvam  → api.sarvam.ai/v1  +  sarvam-m
+  claude  → Anthropic SDK  +  claude-sonnet-4-6  (set ANTHROPIC_API_KEY in .env)
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 
 import httpx
 
@@ -37,6 +39,10 @@ _PROVIDER_DEFAULTS: dict[str, dict[str, str]] = {
     "sarvam": {
         "base_url": "https://api.sarvam.ai/v1",
         "model": "sarvam-m",
+    },
+    "claude": {
+        "base_url": "",  # uses Anthropic SDK, not httpx
+        "model": "claude-sonnet-4-6",
     },
 }
 
@@ -124,6 +130,66 @@ def embed_one(text: str, input_type: str = "query") -> list[float]:
 
 
 # ---------------------------------------------------------------------------
+# Claude (Anthropic SDK) — used when LLM_PROVIDER=claude
+# ---------------------------------------------------------------------------
+def _chat_claude(messages: list[dict], temperature: float, max_tokens: int) -> str:
+    import anthropic  # lazy import — only needed when provider=claude
+    api_key = settings.llm_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    model = settings.llm_model or _PROVIDER_DEFAULTS["claude"]["model"]
+    client = anthropic.Anthropic(api_key=api_key)
+
+    # Split system message out (Anthropic API separates it)
+    system = ""
+    user_messages = []
+    for m in messages:
+        if m["role"] == "system":
+            system = m["content"]
+        else:
+            user_messages.append({"role": m["role"], "content": m["content"]})
+
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": user_messages,
+    }
+    if system:
+        kwargs["system"] = system
+
+    response = client.messages.create(**kwargs)
+    return response.content[0].text
+
+
+def _chat_claude_stream(messages: list[dict], temperature: float, max_tokens: int):
+    import anthropic
+    api_key = settings.llm_api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    model = settings.llm_model or _PROVIDER_DEFAULTS["claude"]["model"]
+    client = anthropic.Anthropic(api_key=api_key)
+
+    system = ""
+    user_messages = []
+    for m in messages:
+        if m["role"] == "system":
+            system = m["content"]
+        else:
+            user_messages.append({"role": m["role"], "content": m["content"]})
+
+    kwargs: dict = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "messages": user_messages,
+    }
+    if system:
+        kwargs["system"] = system
+
+    with client.messages.stream(**kwargs) as stream:
+        for text in stream.text_stream:
+            if text:
+                yield text
+
+
+# ---------------------------------------------------------------------------
 # Chat — non-streaming (returns full content string)
 # ---------------------------------------------------------------------------
 def chat(
@@ -132,6 +198,9 @@ def chat(
     max_tokens: int = 1400,
     response_format: dict | None = None,
 ) -> str:
+    if settings.llm_provider == "claude":
+        return _chat_claude(messages, temperature, max_tokens)
+
     payload: dict = {
         "model": _llm_model(),
         "messages": messages,
@@ -165,6 +234,10 @@ def chat_stream(
         "max_tokens": max_tokens,
         "stream": True,
     }
+    if settings.llm_provider == "claude":
+        yield from _chat_claude_stream(messages, temperature, max_tokens)
+        return
+
     with _get_llm_client().stream("POST", "/chat/completions", json=payload) as resp:
         resp.raise_for_status()
         content_type = resp.headers.get("content-type", "")

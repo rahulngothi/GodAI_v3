@@ -34,6 +34,8 @@ from app.nvidia import chat, embed_one
 from app.themes import THEMES_LIST
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -526,14 +528,26 @@ def generate_cell(
     log.info("Generating %d questions for %s/%s/depth%d …", needed, theme, qtype, depth)
     prompt = _generation_prompt(theme, qtype, depth, needed + 2)  # ask extra, validate filters
 
-    try:
-        raw = chat(
-            [{"role": "user", "content": prompt}],
-            temperature=0.8,
-            max_tokens=2000,
-        )
-    except Exception as exc:
-        log.error("LLM call failed for %s/%s/depth%d: %s", theme, qtype, depth, exc)
+    raw = None
+    for attempt in range(4):
+        try:
+            raw = chat(
+                [{"role": "user", "content": prompt}],
+                temperature=0.8,
+                max_tokens=2000,
+            )
+            break
+        except Exception as exc:
+            exc_str = str(exc)
+            is_rate_limit = "429" in exc_str
+            wait = (60 * (attempt + 1)) if is_rate_limit else (8 * (attempt + 1))
+            log.warning("LLM attempt %d failed for %s/%s/depth%d (%s) — waiting %ds",
+                        attempt + 1, theme, qtype, depth,
+                        "rate-limited" if is_rate_limit else "error", wait)
+            if attempt < 3:
+                time.sleep(wait)
+    if raw is None:
+        log.error("All LLM attempts failed for %s/%s/depth%d", theme, qtype, depth)
         return 0
 
     # Parse JSON array
