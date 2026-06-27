@@ -87,6 +87,10 @@ class Settings(BaseSettings):
         "The voice is clear and close-sounding with no background noise."
     )
 
+    # Whisper model for STT. Options: tiny, base, small, medium, large-v3
+    # small is the recommended balance of speed and Hindi accuracy on CPU.
+    whisper_model: str = "small"
+
     # ── Reflective Question Engine ────────────────────────────────────────
     # Master switch — set RQE_ENABLED=false to disable the whole engine.
     rqe_enabled: bool = True

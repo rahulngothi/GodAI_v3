@@ -19,7 +19,8 @@ log = logging.getLogger(__name__)
 @lru_cache(maxsize=1)
 def _get_model():
     from faster_whisper import WhisperModel
-    model_name = os.environ.get("WHISPER_MODEL", "base")
+    from app.config import settings
+    model_name = settings.whisper_model
     log.info("Loading Whisper model '%s' (first request — may download)…", model_name)
     # cpu + int8 = good speed on Mac without GPU
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
