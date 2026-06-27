@@ -569,10 +569,6 @@ async function sendStreaming(question, wrap) {
         if (evt.chat_id) chatId = evt.chat_id;
         history.push({ role: "user", content: question });
         history.push({ role: "assistant", content: evt.answer || "" });
-        // Auto-speak: fire only after a user gesture has unlocked audio
-        if (autoSpeak && audioUnlocked && evt.answer) {
-          speak(evt.answer, null, currentPersona);
-        }
       }
     }
   }
@@ -682,8 +678,6 @@ let _ttsFetch = null;      // AbortController for the in-flight /api/tts fetch
 // We set this flag on the first click anywhere, then auto-speak can fire.
 let audioUnlocked = false;
 
-// Auto-speak preference (persisted across sessions)
-let autoSpeak = localStorage.getItem("dharma_autospeak") === "1";
 
 function _getAudioCtx() {
   if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -793,7 +787,6 @@ function stopSpeaking() {
   // Stop browser speech synthesis
   if ("speechSynthesis" in window) window.speechSynthesis.cancel();
   if (activeStage) { activeStage.classList.remove("talking", "loading"); activeStage = null; }
-  speakOverlay.classList.remove("loading-state");
   speakOverlay.hidden = true;
   if (speakingBtn) { speakingBtn.classList.remove("speaking"); speakingBtn.textContent = "🔊 Listen"; speakingBtn = null; }
 }
@@ -801,23 +794,17 @@ function stopSpeaking() {
 // speak() — primary entry point.
 // 1. Tries POST /api/tts (HF indic-parler-tts — authentic Indian voice).
 // 2. On 503 / network error falls back to browser Web Speech API.
-// Calling speak() while already speaking stops current playback (toggle behaviour).
+// Calling speak() while already speaking stops playback (toggle).
 async function speak(text, btn, personaKey) {
   if (speakingBtn || _ttsFetch) { stopSpeaking(); return; }
   const clean = cleanForSpeech(text);
   if (!clean) return;
 
-  // Show the overlay in "loading" state while we wait for the server
   document.getElementById("speakFace").innerHTML = faceHTML(personaKey);
   document.getElementById("speakName").textContent = personaKey === "guide" ? "Dharma Guide" : personaName(personaKey);
-  const statusEl = document.getElementById("speakStatus");
-  const hintEl = document.getElementById("speakHint");
-  statusEl.textContent = "Summoning the voice…";
-  hintEl.textContent = "";
-  speakOverlay.classList.add("loading-state");
   speakOverlay.hidden = false;
   const stage = document.getElementById("speakStage");
-  stage.classList.add("loading");
+  stage.classList.add("loading");  // slow-pulse rings while fetching
 
   speakingBtn = btn;
   if (btn) { btn.classList.add("speaking"); btn.textContent = "⏹ Stop"; }
@@ -837,34 +824,25 @@ async function speak(text, btn, personaKey) {
       if (resp.ok) {
         const buf = await resp.arrayBuffer();
         stage.classList.remove("loading");
-        speakOverlay.classList.remove("loading-state");
         stage.classList.add("talking");
         activeStage = stage;
-        statusEl.textContent = "tap anywhere to stop";
-        hintEl.textContent = "";
         await _playAudioBuffer(buf);
         stopSpeaking();
         return;
       }
 
-      // 503 = server signals "use browser" (no token, no GPU, all backends down)
       if (resp.status !== 503) throw new Error(`TTS ${resp.status}`);
-      const data = await resp.json().catch(() => ({}));
-      if (data.fallback !== "browser") throw new Error("TTS unavailable");
     } catch (e) {
       _ttsFetch = null;
-      if (e.name === "AbortError") return;  // user stopped mid-fetch
-      // Fall through to browser
+      if (e.name === "AbortError") return;
+      // fall through to browser
     }
   }
 
   // ── Browser Web Speech API fallback ────────────────────────────────────
   stage.classList.remove("loading");
-  speakOverlay.classList.remove("loading-state");
-  statusEl.textContent = "tap anywhere to stop";
-
   speakRaw(clean, stage, () => { stopSpeaking(); }, (langName) => {
-    hintEl.textContent = `no ${langName} voice on this device — a better voice loads from the server next time`;
+    document.querySelector(".speak-hint").textContent = `your device has no ${langName} voice installed — reply shown as text in the chat 🙏`;
   });
 }
 
@@ -1027,24 +1005,6 @@ const installBtn = document.getElementById("installBtn");
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredPrompt = e; installBtn.hidden = false; });
 installBtn.onclick = async () => { if (!deferredPrompt) return; deferredPrompt.prompt(); await deferredPrompt.userChoice; deferredPrompt = null; installBtn.hidden = true; };
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
-
-// ================= auto-speak toggle =================
-const autoSpeakBtn = document.getElementById("autoSpeakBtn");
-
-function _updateAutoSpeakBtn() {
-  autoSpeakBtn.textContent = autoSpeak ? "🔊" : "🔈";
-  autoSpeakBtn.classList.toggle("active", autoSpeak);
-  autoSpeakBtn.setAttribute("aria-pressed", String(autoSpeak));
-  autoSpeakBtn.title = autoSpeak ? "Auto-speak: ON (tap to disable)" : "Auto-speak: OFF (tap to enable)";
-}
-
-autoSpeakBtn.addEventListener("click", () => {
-  autoSpeak = !autoSpeak;
-  localStorage.setItem("dharma_autospeak", autoSpeak ? "1" : "0");
-  _updateAutoSpeakBtn();
-});
-
-_updateAutoSpeakBtn();
 
 // ================= audio unlock (mobile autoplay gate) =================
 // Browsers require a user gesture before audio can play.
