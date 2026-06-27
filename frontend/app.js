@@ -500,6 +500,80 @@ async function initPushBell(btn) {
 }
 
 // ================= ask =================
+
+// Streaming send — used for converse mode (eliminates the 10-12s silence)
+async function sendStreaming(question, wrap) {
+  let streamBuf = "";
+  let streamEl = null;   // element showing live tokens
+  let sseRemainder = ""; // incomplete SSE line carried across chunks
+
+  const resp = await fetch(`${API}/api/ask/stream`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      question, persona: currentPersona, language: currentLanguage,
+      history: history.slice(-6), chat_id: chatId,
+    }),
+  });
+
+  if (resp.status === 401) {
+    token = ""; localStorage.removeItem("dharma_token"); showLogin(true);
+    throw new Error("Please sign in.");
+  }
+  if (!resp.ok) {
+    let msg = "Something went wrong (" + resp.status + ")";
+    try { const j = await resp.json(); if (j.detail) msg = j.detail; } catch (_) {}
+    throw new Error(msg);
+  }
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    sseRemainder += decoder.decode(value, { stream: true });
+    const lines = sseRemainder.split("\n");
+    sseRemainder = lines.pop(); // keep incomplete line for next chunk
+
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      let evt;
+      try { evt = JSON.parse(line.slice(6)); } catch (_) { continue; }
+
+      if (evt.token !== undefined) {
+        // First token: replace typing dots with a live streaming view
+        if (!streamEl) {
+          wrap.innerHTML = `<div class="answer-card"><div class="answer-text stream-live"></div></div>`;
+          streamEl = wrap.querySelector(".answer-text");
+        }
+        streamBuf += evt.token;
+        streamEl.innerHTML = renderAnswer(streamBuf);
+        scrollDown();
+
+      } else if (evt.replaced !== undefined) {
+        // Post-stream correction (wrong language or moderation fix)
+        streamBuf = evt.answer || streamBuf;
+        if (streamEl) {
+          streamEl.innerHTML = `<em style="opacity:.55;font-size:.93em">${escapeHtml(evt.replaced)}</em>`;
+          setTimeout(() => {
+            if (streamEl) streamEl.innerHTML = renderAnswer(streamBuf);
+            scrollDown();
+          }, 700);
+        }
+
+      } else if (evt.done) {
+        // Final event — render the full response card (with citations, followups)
+        renderResponse(wrap, evt);
+        if (evt.chat_id) chatId = evt.chat_id;
+        history.push({ role: "user", content: question });
+        history.push({ role: "assistant", content: evt.answer || "" });
+      }
+    }
+  }
+}
+
 async function send(question) {
   question = (question || input.value).trim();
   if (!question) return;
@@ -509,22 +583,16 @@ async function send(question) {
   const wrap = addTyping();
   const perspectivesMode = currentMode === "perspectives";
   try {
-    const url = perspectivesMode ? `/api/perspectives` : `/api/ask`;
-    const body = perspectivesMode
-      ? { question, language: currentLanguage }
-      : { question, persona: currentPersona, language: currentLanguage, history: history.slice(-6), chat_id: chatId };
-    const data = await apiFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
     if (perspectivesMode) {
+      const data = await apiFetch(`/api/perspectives`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question, language: currentLanguage }),
+      });
       renderPerspectives(wrap, data);
     } else {
-      renderResponse(wrap, data);
-      if (data.chat_id) chatId = data.chat_id;
-      history.push({ role: "user", content: question });
-      history.push({ role: "assistant", content: data.answer || "" });
+      // Use streaming endpoint for converse mode
+      await sendStreaming(question, wrap);
     }
   } catch (e) {
     wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">🙏 ${escapeHtml(e.message)}</div></div>`;
@@ -719,36 +787,68 @@ document.getElementById("convoClose").addEventListener("click", closeConvo);
 async function convoAsk(question) {
   if (convoBusy) return;
   convoBusy = true;
-  convoStatus.textContent = "listening to your heart…";
-  convoText.textContent = "“" + question + "”";
-  // mirror into the chat behind, so text mode keeps the full record (with sources)
+  convoStatus.textContent = “listening to your heart…”;
+  convoText.textContent = ““” + question + “””;
   addUser(question);
   const wrap = addTyping();
   try {
-    const data = await apiFetch("/api/ask", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
+    // Stream in the background; collect the final answer for TTS
+    let finalAnswer = “”;
+    let sseRemainder = “”;
+    const resp = await fetch(`${API}/api/ask/stream`, {
+      method: “POST”,
+      headers: { “Content-Type”: “application/json”, Authorization: `Bearer ${token}` },
       body: JSON.stringify({ question, persona: currentPersona, language: currentLanguage, history: history.slice(-6), chat_id: chatId }),
     });
-    renderResponse(wrap, data);
-    if (data.chat_id) chatId = data.chat_id;
-    history.push({ role: "user", content: question });
-    history.push({ role: "assistant", content: data.answer || "" });
-    // conversational view: just the words, no sources
-    const spoken = cleanForSpeech(data.answer || "");
+    if (!resp.ok) throw new Error(“Something went wrong (“ + resp.status + “)”);
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let streamEl = null;
+    let streamBuf = “”;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      sseRemainder += decoder.decode(value, { stream: true });
+      const lines = sseRemainder.split(“\n”);
+      sseRemainder = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith(“data: “)) continue;
+        let evt;
+        try { evt = JSON.parse(line.slice(6)); } catch (_) { continue; }
+        if (evt.token !== undefined) {
+          if (!streamEl) {
+            wrap.innerHTML = `<div class=”answer-card”><div class=”answer-text stream-live”></div></div>`;
+            streamEl = wrap.querySelector(“.answer-text”);
+          }
+          streamBuf += evt.token;
+          streamEl.innerHTML = renderAnswer(streamBuf);
+          scrollDown();
+        } else if (evt.replaced !== undefined) {
+          streamBuf = evt.answer || streamBuf;
+          if (streamEl) streamEl.innerHTML = renderAnswer(streamBuf);
+        } else if (evt.done) {
+          renderResponse(wrap, evt);
+          if (evt.chat_id) chatId = evt.chat_id;
+          history.push({ role: “user”, content: question });
+          history.push({ role: “assistant”, content: evt.answer || “” });
+          finalAnswer = evt.answer || “”;
+        }
+      }
+    }
+    const spoken = cleanForSpeech(finalAnswer);
     convoText.textContent = spoken;
-    convoStatus.textContent = personaName(currentPersona) + " is speaking…";
-    convoOverlay.classList.add("talking");
+    convoStatus.textContent = personaName(currentPersona) + “ is speaking…”;
+    convoOverlay.classList.add(“talking”);
     speakRaw(spoken, convoStage, () => {
-      convoOverlay.classList.remove("talking");
-      if (!convoStatus.dataset.novoice) convoStatus.textContent = "tap the mic to reply";
+      convoOverlay.classList.remove(“talking”);
+      if (!convoStatus.dataset.novoice) convoStatus.textContent = “tap the mic to reply”;
       delete convoStatus.dataset.novoice;
     }, (langName) => {
-      convoStatus.dataset.novoice = "1";
+      convoStatus.dataset.novoice = “1”;
       convoStatus.textContent = `⚠ your device has no ${langName} voice — read the reply below, then tap the mic`;
     });
   } catch (e) {
-    wrap.innerHTML = `<div class="answer-card"><div class="answer-text" style="color:#b8410e">🙏 ${escapeHtml(e.message)}</div></div>`;
+    wrap.innerHTML = `<div class=”answer-card”><div class=”answer-text” style=”color:#b8410e”>🙏 ${escapeHtml(e.message)}</div></div>`;
     convoStatus.textContent = e.message;
   } finally {
     convoBusy = false;

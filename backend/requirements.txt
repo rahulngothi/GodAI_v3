@@ -1,3 +1,4 @@
+anthropic
 fastapi
 uvicorn[standard]
 pymongo
@@ -8,3 +9,4 @@ pydantic
 pydantic-settings
 pillow
 pywebpush
+langdetect
