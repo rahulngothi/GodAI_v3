@@ -126,7 +126,7 @@ async def synthesize_speech(body: TTSRequest, user: str = Depends(get_current_us
         if cached:
             return Response(
                 content=cached,
-                media_type="audio/flac",
+                media_type="audio/mpeg",
                 headers={"X-TTS-Backend": "cache", "X-TTS-Source": backend_name},
             )
 
@@ -141,7 +141,7 @@ async def synthesize_speech(body: TTSRequest, user: str = Depends(get_current_us
 
         return Response(
             content=audio,
-            media_type="audio/flac",
+            media_type="audio/mpeg",
             headers={"X-TTS-Backend": backend_name},
         )
 

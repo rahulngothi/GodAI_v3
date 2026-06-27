@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     # TTS_BACKEND controls which engine is tried first.
     # Fallback chain is tried left-to-right; "browser" signals the client.
     # Supported names: hf_indic, browser
-    tts_backend: str = "hf_indic"
-    tts_fallback_order: str = "hf_indic,browser"
+    tts_backend: str = "edge_tts"
+    tts_fallback_order: str = "edge_tts,browser"
 
     # HuggingFace Inference API — required for hf_indic backend.
     # Get a free token at huggingface.co/settings/tokens (read scope is enough).

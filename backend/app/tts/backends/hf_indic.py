@@ -19,7 +19,7 @@ from ..registry import register
 
 log = logging.getLogger(__name__)
 
-_DEFAULT_URL = "https://api-inference.huggingface.co/models/ai4bharat/indic-parler-tts"
+_DEFAULT_URL = "https://router.huggingface.co/hf-inference/models/ai4bharat/indic-parler-tts"
 
 
 @register("hf_indic")
