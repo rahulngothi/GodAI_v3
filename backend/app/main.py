@@ -3,10 +3,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import logging
+
 from fastapi import FastAPI, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+log = logging.getLogger(__name__)
 
 import datetime as _dt
 
@@ -36,6 +41,7 @@ from .schemas import (
     LoginResponse,
     PerspectivesRequest,
     PerspectivesResponse,
+    TTSRequest,
 )
 
 app = FastAPI(title="Dharma AI", version="1.0.0")
@@ -77,6 +83,73 @@ def health():
         "embed": settings.embed_model,
     }
 
+
+# ─── TTS ──────────────────────────────────────────────────────────────────────
+
+@app.get("/api/tts/health")
+def tts_health():
+    from .tts import get_backend, get_default_profile
+    profile = get_default_profile()
+    backend = get_backend(settings.tts_backend)
+    return {
+        "backend": settings.tts_backend,
+        "available": backend is not None and backend.health_check(),
+        "fallback_order": settings.tts_fallback_order,
+        "voice_profile": profile.name,
+        "hf_token_set": bool(settings.hf_api_token),
+    }
+
+
+@app.post("/api/tts")
+async def synthesize_speech(body: TTSRequest, user: str = Depends(get_current_user)):
+    from .tts import get_backend, get_cache, get_default_profile, prepare_text
+
+    text = prepare_text(body.text, body.language, settings.tts_citation_mode)
+    if not text:
+        raise HTTPException(400, "Empty text after cleanup")
+
+    profile = get_default_profile()
+    chain = [b.strip() for b in settings.tts_fallback_order.split(",") if b.strip()]
+    cache = get_cache(settings.tts_cache_max_items)
+
+    for backend_name in chain:
+        # "browser" is the last resort — tell the client to use Web Speech API
+        if backend_name == "browser":
+            return JSONResponse({"fallback": "browser"}, status_code=503)
+
+        backend = get_backend(backend_name)
+        if backend is None or not backend.health_check():
+            continue
+
+        # Cache hit — serve immediately
+        cached = cache.get(text, body.language, profile.name, backend_name)
+        if cached:
+            return Response(
+                content=cached,
+                media_type="audio/flac",
+                headers={"X-TTS-Backend": "cache", "X-TTS-Source": backend_name},
+            )
+
+        try:
+            audio = await run_in_threadpool(backend.synthesize, text, body.language, profile)
+        except Exception as exc:
+            log.warning("TTS backend %r failed: %s", backend_name, exc)
+            continue
+
+        if settings.tts_cache_enabled:
+            cache.put(text, body.language, profile.name, backend_name, audio)
+
+        return Response(
+            content=audio,
+            media_type="audio/flac",
+            headers={"X-TTS-Backend": backend_name},
+        )
+
+    # All server backends failed — client falls back to Web Speech API
+    return JSONResponse({"fallback": "browser"}, status_code=503)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/personas")
 def list_personas():

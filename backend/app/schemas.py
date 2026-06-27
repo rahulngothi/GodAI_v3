@@ -87,6 +87,13 @@ class DailyResponse(BaseModel):
     journal_prompt: str
 
 
+# ---- TTS ----
+class TTSRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=8000)
+    language: str = "english"
+    voice_profile: str = "krishna-default"
+
+
 # ---- Auth ----
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
