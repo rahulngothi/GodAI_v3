@@ -659,17 +659,22 @@ function _whisperMic(btn, onResult, onStatus) {
   let recorder = null;
   let chunks = [];
   let active = false;
+  let autoStopTimer = null;
+  const origLabel = btn.textContent;
+
+  function _stop() {
+    if (autoStopTimer) { clearTimeout(autoStopTimer); autoStopTimer = null; }
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  }
 
   btn.addEventListener("click", async () => {
-    if (active) {
-      // Second click — stop recording
-      recorder && recorder.stop();
-      return;
-    }
+    if (active) { _stop(); return; }
+
     active = true;
     chunks = [];
     btn.classList.add("listening");
-    if (onStatus) onStatus("listening…");
+    btn.textContent = "⏹ Done";
+    if (onStatus) onStatus("listening… tap Done when finished");
 
     let stream;
     try {
@@ -677,21 +682,23 @@ function _whisperMic(btn, onResult, onStatus) {
     } catch (e) {
       active = false;
       btn.classList.remove("listening");
+      btn.textContent = origLabel;
       if (onStatus) onStatus("mic access denied");
       return;
     }
 
-    // Prefer WebM Opus (Chrome); fall back to whatever the browser supports
     const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
       ? "audio/webm;codecs=opus"
       : MediaRecorder.isTypeSupported("audio/webm")
       ? "audio/webm"
       : "";
     recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+    // collect data every 250 ms so chunks are never empty on short clips
     recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
     recorder.onstop = async () => {
       stream.getTracks().forEach((t) => t.stop());
       btn.classList.remove("listening");
+      btn.textContent = origLabel;
       active = false;
       if (!chunks.length) return;
       if (onStatus) onStatus("transcribing…");
@@ -710,6 +717,7 @@ function _whisperMic(btn, onResult, onStatus) {
         if (resp.ok) {
           const data = await resp.json();
           if (data.text) onResult(data.text);
+          else if (onStatus) onStatus("nothing heard — try again");
         } else {
           if (onStatus) onStatus("couldn't hear — try again");
         }
@@ -720,7 +728,9 @@ function _whisperMic(btn, onResult, onStatus) {
         if (onStatus) onStatus("");
       }
     };
-    recorder.start();
+    recorder.start(250);  // fire ondataavailable every 250 ms
+    // Auto-stop after 15 s so the user doesn't have to remember to tap Done
+    autoStopTimer = setTimeout(_stop, 15000);
   });
 
   return true;
