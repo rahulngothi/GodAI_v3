@@ -38,17 +38,18 @@ def transcribe(audio_bytes: bytes, hint_language: str = "") -> dict:
         tmp_path = f.name
 
     try:
-        # language=None → auto-detect (best for Hindi/Hinglish/English)
-        # beam_size=5, best_of=5 → accuracy over speed
-        lang_arg = hint_language if hint_language in ("hi", "en") else None
-        segments, info = model.transcribe(
+        # Force Hindi + seed with Devanagari prompt so the tokenizer outputs
+        # Devanagari instead of Urdu (Arabic) script — same spoken language,
+        # different script, and Whisper base confuses the two without this hint.
+        segments, _ = model.transcribe(
             tmp_path,
-            language=lang_arg,
+            language="hi",
+            initial_prompt="यह हिंदी में बातचीत है।",
             beam_size=5,
-            vad_filter=True,       # skip silent regions
+            vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 500},
         )
         text = " ".join(seg.text.strip() for seg in segments).strip()
-        return {"text": text, "language": info.language}
+        return {"text": text, "language": "hi"}
     finally:
         os.unlink(tmp_path)

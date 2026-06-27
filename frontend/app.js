@@ -701,7 +701,7 @@ function _whisperMic(btn, onResult, onStatus) {
         const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
         const form = new FormData();
         form.append("audio", blob, "audio.webm");
-        form.append("language", currentLanguage === "hindi" ? "hi" : "en");
+        form.append("language", "hi");
         const resp = await fetch(`${API}/api/stt`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
