@@ -7,10 +7,6 @@ ENV PYTHONUNBUFFERED=1 PYTHONUTF8=1
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 
-# Pre-download Whisper small model into the image layer (~464 MB).
-# Avoids a cold-start download on the first STT request in production.
-RUN python3 -c "from faster_whisper import WhisperModel; WhisperModel('small', device='cpu', compute_type='int8')"
-
 # App code (frontend is static — no build step) + backend
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
