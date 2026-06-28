@@ -36,7 +36,7 @@ jobs:
               echo '/swapfile none swap sw 0 0' >> /etc/fstab
             fi
 
-            REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/SiddharthDedhia/GodAI.git"
+            REPO_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/RadianConsulting/GodAI.git"
 
             # Clone or pull
             if [ ! -d "/root/GodAI/.git" ]; then
