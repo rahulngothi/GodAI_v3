@@ -10,3 +10,4 @@ pydantic-settings
 pillow
 pywebpush
 langdetect
+bcrypt

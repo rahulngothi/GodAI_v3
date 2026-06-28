@@ -20,6 +20,7 @@ from typing import Callable, Iterator
 from .config import settings
 from .engagement import process_engagement
 from .lang_detect import resolve_language, verify_language
+from .memory import build_memory_context, get_profile
 from .nvidia import chat, chat_stream
 from .personas import get_persona
 from .themes import normalize_themes
@@ -107,7 +108,7 @@ You ARE {persona_name}. A seeker has come to sit with you — not to exchange me
 
 WHO YOU ARE:
 {style}
-
+{memory_context}
 THE VOICE YOU CARRY:
 Warm, calm, and touched by the sacred — the way a loving guide addresses a sincere seeker. You speak with the warmth of one who has sat with these questions for a long time, not the authority of one who pronounces from above. Reverent without being distant. Tender without being sentimental.
 
@@ -169,12 +170,15 @@ def _build_system(
     lang_key: str,
     lang_display: str,
     streaming: bool = False,
+    memory_context: str = "",
 ) -> str:
     directive = _lang_directive(lang_display)
+    mem_section = f"\n{memory_context}\n" if memory_context else ""
     return _BASE_TEMPLATE.format(
         lang_directive_top=directive,
         persona_name=persona_name,
         style=style,
+        memory_context=mem_section,
         fewshot_block=_fewshot_for_lang(lang_key, persona_name),
         output_instruction=_OUTPUT_PLAIN if streaming else _OUTPUT_JSON,
         lang_directive_bottom=directive,
@@ -366,18 +370,34 @@ def ask(
             "reflective": None,
         }
 
+    # Load profile + memory (fast MongoDB reads — no LLM call here).
+    mem_block = ""
+    try:
+        if user and user != "anonymous":
+            profile = get_profile(user)
+            mem_block = build_memory_context(user, profile.get("answer_style", "deep")) or ""
+    except Exception:
+        pass
+
     lang_key, lang_display = resolve_language(safe_question, language)
 
     # Theme-expanded retrieval (themes come free from the safety classifier call).
     retrieval_query = f"{sr.themes} — {safe_question}" if sr.themes else safe_question
-    verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
+    try:
+        verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
+    except Exception as _rag_err:
+        log.warning("RAG retrieval failed: %s — responding without citations", _rag_err)
+        verses = []
 
     # ── Reflective question engine ─────────────────────────────────────────
     turn_count = sum(1 for t in (history or []) if t.get("role") == "assistant")
     skip, skip_reason = should_skip_question(sr, history or [], user, turn_count)
 
     rfl_meta: dict | None = None
-    system = _build_system(persona["name"], persona["style"], lang_key, lang_display, streaming=False)
+    system = _build_system(
+        persona["name"], persona["style"], lang_key, lang_display,
+        streaming=False, memory_context=mem_block,
+    )
 
     if skip:
         if skip_reason == "continuing_prior_thread" and prior_q:
@@ -430,7 +450,6 @@ def ask(
     answer = screen_output(answer, regenerate_fn=_regenerate, persona_key=persona_key)
     answer = _strip_hallucinated_citations(answer, verses)
 
-    # Capture surface_text for the reflective metadata
     if rfl_meta and rfl_meta.get("shown"):
         rfl_meta["surface_text"] = _extract_closing_question(answer)
         if rfl_meta["question_id"]:
@@ -439,7 +458,6 @@ def ask(
                 rfl_meta["depth"], _get_user_prefs_safe(user),
             )
 
-    # Fire async engagement update for the prior question (non-blocking)
     _fire_engagement(sr, history or [], user, lang_key)
 
     return {
@@ -518,14 +536,29 @@ def ask_stream(
 
     # Theme-expanded retrieval (themes come free from the safety classifier call).
     retrieval_query = f"{sr.themes} — {safe_question}" if sr.themes else safe_question
-    verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
+    try:
+        verses = search(retrieval_query, k=k, min_score=settings.rag_similarity_threshold)
+    except Exception as _rag_err:
+        log.warning("RAG retrieval failed: %s — responding without citations", _rag_err)
+        verses = []
 
     # ── Reflective question engine ─────────────────────────────────────────
     turn_count = sum(1 for t in (history or []) if t.get("role") == "assistant")
     skip, skip_reason = should_skip_question(sr, history or [], user, turn_count)
 
+    mem_block = ""
+    try:
+        if user and user != "anonymous":
+            profile = get_profile(user)
+            mem_block = build_memory_context(user, profile.get("answer_style", "deep")) or ""
+    except Exception:
+        pass
+
     rfl_meta: dict | None = None
-    system = _build_system(persona["name"], persona["style"], lang_key, lang_display, streaming=True)
+    system = _build_system(
+        persona["name"], persona["style"], lang_key, lang_display,
+        streaming=True, memory_context=mem_block,
+    )
 
     if skip:
         if skip_reason == "continuing_prior_thread" and prior_q:
