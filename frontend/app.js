@@ -950,14 +950,8 @@ function _whisperMic(btn, onResult, onStatus) {
   return true;
 }
 
-// Main chat mic
-const _mainMicReady = _whisperMic(
-  micBtn,
-  (text) => { input.value = text; send(text); },
-  null,
-);
-if (!_mainMicReady) {
-  // Browser STT fallback
+// Main chat mic — browser speech recognition only
+{
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SR) {
     const rec = new SR();
@@ -1088,37 +1082,7 @@ async function speak(text, btn, personaKey) {
   speakingBtn = btn;
   if (btn) { btn.classList.add("speaking"); btn.textContent = "⏹ Stop"; }
 
-  // ── Try server TTS ──────────────────────────────────────────────────────
-  if (token) {
-    try {
-      _ttsFetch = new AbortController();
-      const resp = await fetch(`${API}/api/tts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ text: clean, language: currentLanguage }),
-        signal: _ttsFetch.signal,
-      });
-      _ttsFetch = null;
-
-      if (resp.ok) {
-        const buf = await resp.arrayBuffer();
-        stage.classList.remove("loading");
-        stage.classList.add("talking");
-        activeStage = stage;
-        await _playServerAudio(buf);
-        stopSpeaking();
-        return;
-      }
-
-      if (resp.status !== 503) throw new Error(`TTS ${resp.status}`);
-    } catch (e) {
-      _ttsFetch = null;
-      if (e.name === "AbortError") return;
-      // fall through to browser
-    }
-  }
-
-  // ── Browser Web Speech API fallback ────────────────────────────────────
+  // ── Browser Web Speech API ────────────────────────────────────────────
   stage.classList.remove("loading");
   speakRaw(clean, stage, () => { stopSpeaking(); }, (langName) => {
     document.querySelector(".speak-hint").textContent = `your device has no ${langName} voice installed — reply shown as text in the chat 🙏`;
@@ -1209,30 +1173,7 @@ async function convoAsk(question) {
     convoStatus.textContent = personaName(currentPersona) + " is speaking…";
     convoOverlay.classList.add("talking");
 
-    // Try server TTS first; fall back to browser speakRaw
-    let usedServerTTS = false;
-    if (token && spoken) {
-      try {
-        _ttsFetch = new AbortController();
-        const resp = await fetch(`${API}/api/tts`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ text: spoken, language: currentLanguage }),
-          signal: _ttsFetch.signal,
-        });
-        _ttsFetch = null;
-        if (resp.ok) {
-          const buf = await resp.arrayBuffer();
-          await _playServerAudio(buf);
-          usedServerTTS = true;
-        }
-      } catch (e) {
-        _ttsFetch = null;
-        if (e.name === "AbortError") { convoOverlay.classList.remove("talking"); convoBusy = false; return; }
-      }
-    }
-
-    if (!usedServerTTS) {
+    if (spoken) {
       await new Promise((resolve) => {
         speakRaw(spoken, convoStage, resolve, (langName) => {
           convoStatus.dataset.novoice = "1";
@@ -1252,13 +1193,8 @@ async function convoAsk(question) {
   }
 }
 
-// Whisper mic with browser SR fallback
-const _convoMicReady = _whisperMic(
-  convoMic,
-  (text) => { stopSpeaking(); convoOverlay.classList.remove("talking"); convoAsk(text); },
-  (msg) => { convoStatus.textContent = msg; },
-);
-if (!_convoMicReady) {
+// Browser speech recognition for conversation mic
+{
   const SR2 = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (SR2) {
     const crec = new SR2();

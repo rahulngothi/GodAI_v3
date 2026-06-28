@@ -12,5 +12,3 @@ pywebpush
 langdetect
 bcrypt
 python-multipart
-faster-whisper
-edge-tts
