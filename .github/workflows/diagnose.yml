@@ -1,0 +1,34 @@
+name: Server Diagnostics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check server stats via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            echo "=== DISK USAGE ==="
+            df -h
+
+            echo ""
+            echo "=== TOP DISK CONSUMERS ==="
+            du -sh /var/lib/docker /root /swapfile /tmp 2>/dev/null | sort -rh
+
+            echo ""
+            echo "=== DOCKER DISK USAGE ==="
+            docker system df
+
+            echo ""
+            echo "=== MEMORY ==="
+            free -h
+
+            echo ""
+            echo "=== RUNNING CONTAINERS ==="
+            docker compose -f /root/GodAI/docker-compose.yml ps
