@@ -1,11 +1,13 @@
 """Dharma AI FastAPI app — one backend that serves web + (future) mobile clients."""
 from __future__ import annotations
 
+import datetime as _dt
 from pathlib import Path
 
 import logging
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from bson import ObjectId
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -13,19 +15,16 @@ from fastapi.staticfiles import StaticFiles
 
 log = logging.getLogger(__name__)
 
-import datetime as _dt
-
-from bson import ObjectId
-from fastapi import Depends
 
 from . import ask as ask_module
 from . import daily as daily_module
+from . import memory as memory_module
 from . import perspectives as perspectives_module
 from . import push as push_module
 from . import ratelimit
-from .auth import authenticate, create_token, get_current_user
+from .auth import authenticate, create_token, get_current_user, signup
 from .config import settings
-from .db import VERSES, REFLECTIVE_QUESTIONS, USER_PROFILES, get_db, ensure_reflective_indexes
+from .db import VERSES, REFLECTIVE_QUESTIONS, USER_PROFILES, ensure_indexes, get_db
 from .engagement import ENGAGEMENT_SCORES
 from .languages import LANGUAGES
 from .personas import PERSONAS
@@ -41,7 +40,10 @@ from .schemas import (
     LoginResponse,
     PerspectivesRequest,
     PerspectivesResponse,
+    SignupRequest,
     TTSRequest,
+    UserProfile,
+    UserProfileUpdate,
 )
 
 app = FastAPI(title="Dharma AI", version="1.0.0")
@@ -49,31 +51,36 @@ app = FastAPI(title="Dharma AI", version="1.0.0")
 
 @app.on_event("startup")
 def _startup():
+    try:
+        ensure_indexes()
+    except Exception:
+        pass
     push_module.start_scheduler()
     try:
         get_db()["safety_flags"].create_index([("ts", -1)])
         get_db()["safety_flags"].create_index([("user", 1), ("ts", -1)])
     except Exception:
         pass
-    try:
-        ensure_reflective_indexes()
-    except Exception:
-        pass
 
+
+# CORS — locked to configured origins (set ALLOWED_ORIGINS in .env).
+_origins = [o.strip() for o in settings.allowed_origins.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
+# ── health ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def health():
     try:
         count = get_db()[VERSES].count_documents({})
         embedded = get_db()[VERSES].count_documents({"embedding": {"$exists": True}})
-    except Exception as e:  # pragma: no cover
+    except Exception as e:
         return {"status": "db_error", "error": str(e)}
     return {
         "status": "ok",
@@ -113,7 +120,6 @@ async def synthesize_speech(body: TTSRequest, user: str = Depends(get_current_us
     cache = get_cache(settings.tts_cache_max_items)
 
     for backend_name in chain:
-        # "browser" is the last resort — tell the client to use Web Speech API
         if backend_name == "browser":
             return JSONResponse({"fallback": "browser"}, status_code=503)
 
@@ -121,7 +127,6 @@ async def synthesize_speech(body: TTSRequest, user: str = Depends(get_current_us
         if backend is None or not backend.health_check():
             continue
 
-        # Cache hit — serve immediately
         cached = cache.get(text, body.language, profile.name, backend_name)
         if cached:
             return Response(
@@ -145,7 +150,6 @@ async def synthesize_speech(body: TTSRequest, user: str = Depends(get_current_us
             headers={"X-TTS-Backend": backend_name},
         )
 
-    # All server backends failed — client falls back to Web Speech API
     return JSONResponse({"fallback": "browser"}, status_code=503)
 
 
@@ -155,9 +159,6 @@ async def transcribe_speech(
     language: str = Form(default=""),
     user: str = Depends(get_current_user),
 ):
-    """Transcribe voice audio (WebM/MP4/WAV) using Whisper.
-    Returns {"text": str, "language": str} — language is auto-detected.
-    """
     from .stt import transcribe
     data = await audio.read()
     if not data:
@@ -170,7 +171,7 @@ async def transcribe_speech(
     return result
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ── personas / languages ──────────────────────────────────────────────────────
 
 @app.get("/api/personas")
 def list_personas():
@@ -187,6 +188,19 @@ def list_languages():
     ]
 
 
+# ── auth ──────────────────────────────────────────────────────────────────────
+
+@app.post("/api/auth/signup", response_model=LoginResponse)
+def signup_endpoint(req: SignupRequest):
+    try:
+        signup(req.username, req.password, req.display_name)
+        # Persist display_name into user_profiles immediately.
+        memory_module.update_profile(req.username, display_name=req.display_name or req.username)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"token": create_token(req.username), "username": req.username}
+
+
 @app.post("/api/auth/login", response_model=LoginResponse)
 def login(req: LoginRequest):
     if not authenticate(req.username, req.password):
@@ -196,11 +210,34 @@ def login(req: LoginRequest):
 
 @app.get("/api/auth/me")
 def me(user: str = Depends(get_current_user)):
-    return {"username": user}
+    profile = memory_module.get_profile(user)
+    return {"username": user, "display_name": profile["display_name"]}
 
+
+# ── user profile ──────────────────────────────────────────────────────────────
+
+@app.get("/api/profile", response_model=UserProfile)
+def profile_get(user: str = Depends(get_current_user)):
+    return memory_module.get_profile(user)
+
+
+@app.patch("/api/profile", response_model=UserProfile)
+def profile_update(req: UserProfileUpdate, user: str = Depends(get_current_user)):
+    try:
+        memory_module.update_profile(
+            user,
+            display_name=req.display_name,
+            preferred_language=req.preferred_language,
+            answer_style=req.answer_style,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return memory_module.get_profile(user)
+
+
+# ── ask ───────────────────────────────────────────────────────────────────────
 
 def _save_turns(user: str, chat_id: str | None, req: AskRequest, result: dict) -> str:
-    """Persist this exchange into the user's chat document; returns the chat id."""
     chats = get_db()["chats"]
     now = _dt.datetime.now(_dt.timezone.utc)
     assistant_turn = {
@@ -256,24 +293,13 @@ def ask_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
     result["chat_id"] = _save_turns(user, req.chat_id, req, result)
+    # Fire-and-forget: update the rolling memory summary in the background.
+    memory_module.update_memory_bg(user, req.question, result["answer"])
     return result
 
 
 @app.post("/api/ask/stream")
 def ask_stream_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
-    """
-    SSE streaming endpoint.
-
-    Event types the client must handle:
-      data: {"token": "..."}                       — append to streamed answer
-      data: {"replaced": "...", "answer": "..."}   — replace streamed text (lang/mod fix)
-      data: {"done": true, "answer": "...",         — final: render full response card
-             "citations": [...], "followups": [],
-             "persona": "...", "persona_name": "...", "chat_id": "..."}
-
-    Safety: crisis/scope check fires before streaming; lang check + output
-    moderation fire on the completed text and may emit a "replaced" event.
-    """
     ratelimit.check(user)
 
     def on_done(result: dict) -> str:
@@ -297,15 +323,27 @@ def ask_stream_endpoint(req: AskRequest, user: str = Depends(get_current_user)):
     )
 
 
-# ---- saved chats ----
+# ── saved chats ───────────────────────────────────────────────────────────────
+
 @app.get("/api/chats", response_model=list[ChatSummary])
 def chats_list(user: str = Depends(get_current_user)):
     docs = get_db()["chats"].find({"user": user}).sort("updated_at", -1).limit(50)
-    return [
-        {"id": str(d["_id"]), "title": d.get("title", ""), "persona": d.get("persona", "guide"),
-         "language": d.get("language", "english"), "updated": d["updated_at"].strftime("%Y-%m-%d %H:%M")}
-        for d in docs
-    ]
+    result = []
+    for d in docs:
+        preview = ""
+        for t in reversed(d.get("turns", [])):
+            if t.get("role") == "assistant":
+                preview = (t.get("answer") or "").replace("\n", " ").strip()[:80]
+                break
+        result.append({
+            "id": str(d["_id"]),
+            "title": d.get("title", ""),
+            "persona": d.get("persona", "guide"),
+            "language": d.get("language", "english"),
+            "updated": d["updated_at"].strftime("%Y-%m-%d %H:%M"),
+            "preview": preview,
+        })
+    return result
 
 
 @app.get("/api/chats/{chat_id}", response_model=ChatFull)
@@ -317,8 +355,13 @@ def chats_get(chat_id: str, user: str = Depends(get_current_user)):
     d = get_db()["chats"].find_one({"_id": oid, "user": user})
     if not d:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return {"id": str(d["_id"]), "title": d.get("title", ""), "persona": d.get("persona", "guide"),
-            "language": d.get("language", "english"), "turns": d.get("turns", [])}
+    return {
+        "id": str(d["_id"]),
+        "title": d.get("title", ""),
+        "persona": d.get("persona", "guide"),
+        "language": d.get("language", "english"),
+        "turns": d.get("turns", []),
+    }
 
 
 @app.delete("/api/chats/{chat_id}")
@@ -331,6 +374,8 @@ def chats_delete(chat_id: str, user: str = Depends(get_current_user)):
     return {"deleted": res.deleted_count == 1}
 
 
+# ── perspectives ──────────────────────────────────────────────────────────────
+
 @app.post("/api/perspectives", response_model=PerspectivesResponse)
 def perspectives_endpoint(req: PerspectivesRequest, user: str = Depends(get_current_user)):
     ratelimit.check(user)
@@ -339,6 +384,8 @@ def perspectives_endpoint(req: PerspectivesRequest, user: str = Depends(get_curr
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
+
+# ── daily ─────────────────────────────────────────────────────────────────────
 
 @app.get("/api/daily", response_model=DailyResponse)
 def daily_endpoint(
@@ -353,7 +400,8 @@ def daily_endpoint(
         raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {e}")
 
 
-# ---- Journal (per user) ----
+# ── journal ───────────────────────────────────────────────────────────────────
+
 @app.post("/api/journal", response_model=JournalEntry)
 def journal_save(req: JournalSaveRequest, user: str = Depends(get_current_user)):
     doc = {
@@ -386,7 +434,8 @@ def journal_delete(entry_id: str, user: str = Depends(get_current_user)):
     return {"deleted": res.deleted_count == 1}
 
 
-# ---- Web push (Daily Guidance notifications) ----
+# ── web push ──────────────────────────────────────────────────────────────────
+
 @app.get("/api/push/vapid")
 def push_vapid():
     return {"publicKey": settings.vapid_public_key, "enabled": push_module.enabled()}
@@ -408,7 +457,6 @@ def push_unsubscribe(body: dict, user: str = Depends(get_current_user)):
 
 @app.post("/api/push/test")
 def push_test(user: str = Depends(get_current_user)):
-    """Send the morning payload to all subscriptions now (for verification)."""
     return push_module.send_to_all("morning")
 
 

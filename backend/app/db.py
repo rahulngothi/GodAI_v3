@@ -25,9 +25,17 @@ def get_db() -> Database:
     return get_client()[settings.mongo_db]
 
 
-def ensure_reflective_indexes() -> None:
-    """Create indexes for the reflective question engine. Idempotent."""
+def ensure_indexes() -> None:
+    """Create all MongoDB indexes. Idempotent."""
     db = get_db()
+
+    # Auth + memory (from auth-memory-profiles branch)
+    db["users"].create_index("username", unique=True)
+    db["user_profiles"].create_index("user", unique=True)
+    db["user_memory"].create_index("user", unique=True)
+    db["chats"].create_index([("user", 1), ("updated_at", -1)])
+
+    # Reflective Question Engine
     rq = db[REFLECTIVE_QUESTIONS]
     rq.create_index([("themes", ASCENDING)])
     rq.create_index([("type", ASCENDING)])

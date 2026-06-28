@@ -1,11 +1,12 @@
-// ================= Dharma AI — frontend v2 =================
+// ================= Dharma AI — frontend v3 =================
 const API = "";
 let currentPersona = "krishna";
 let currentLanguage = "english";
 let currentMode = "converse"; // converse | perspectives | daily
 let currentUser = "";
+let currentDisplayName = "";
 let history = [];
-let chatId = null;   // saved-conversation id (server-side)
+let chatId = null;
 const LANG_BCP = { english: "en-IN" };
 
 const chat = document.getElementById("chat");
@@ -16,6 +17,7 @@ const micBtn = document.getElementById("micBtn");
 const languageSel = document.getElementById("language");
 const loginOverlay = document.getElementById("loginOverlay");
 const logoutBtn = document.getElementById("logoutBtn");
+const profileBtn = document.getElementById("profileBtn");
 const speakOverlay = document.getElementById("speakOverlay");
 
 const bcp47 = () => LANG_BCP[currentLanguage] || "en-IN";
@@ -27,10 +29,12 @@ const personaName = (k) => (personaMeta[k] && personaMeta[k].name) || "Dharma Gu
 
 // ================= auth =================
 let token = localStorage.getItem("dharma_token") || "";
+let isSignupMode = false;
 
 function showLogin(show) {
   loginOverlay.hidden = !show;
   logoutBtn.hidden = show;
+  profileBtn.hidden = show;
 }
 
 async function apiFetch(path, opts = {}) {
@@ -49,38 +53,73 @@ async function apiFetch(path, opts = {}) {
   return res.json();
 }
 
+// ── signup/login toggle ──
+document.getElementById("toggleAuth").addEventListener("click", () => {
+  isSignupMode = !isSignupMode;
+  document.querySelectorAll(".signup-only").forEach((el) => {
+    el.style.display = isSignupMode ? "" : "none";
+  });
+  document.getElementById("loginSubmit").textContent = isSignupMode ? "Create account 🙏" : "Begin 🙏";
+  document.getElementById("toggleMsg").textContent = isSignupMode ? "Already have an account?" : "New here?";
+  document.getElementById("toggleAuth").textContent = isSignupMode ? "Sign in" : "Create account";
+  document.getElementById("loginUser").autocomplete = isSignupMode ? "username" : "username";
+  document.getElementById("loginPass").autocomplete = isSignupMode ? "new-password" : "current-password";
+  document.getElementById("loginError").hidden = true;
+});
+
 document.getElementById("loginForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const errEl = document.getElementById("loginError");
   const btn = document.getElementById("loginSubmit");
   errEl.hidden = true;
-  btn.disabled = true; btn.textContent = "Opening the door…";
+  btn.disabled = true;
+  btn.textContent = isSignupMode ? "Creating account…" : "Opening the door…";
+
+  const username = document.getElementById("loginUser").value.trim();
+  const password = document.getElementById("loginPass").value;
+
   try {
-    const res = await fetch(`${API}/api/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: document.getElementById("loginUser").value.trim(),
-        password: document.getElementById("loginPass").value,
-      }),
-    });
-    if (!res.ok) throw new Error((await res.json()).detail || "Sign-in failed");
-    const data = await res.json();
-    token = data.token;
-    currentUser = data.username;
-    localStorage.setItem("dharma_token", token);
+    if (isSignupMode) {
+      const confirm = document.getElementById("signupConfirm").value;
+      if (password !== confirm) throw new Error("Passwords do not match.");
+      const displayName = document.getElementById("signupName").value.trim();
+      const res = await fetch(`${API}/api/auth/signup`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, display_name: displayName }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Signup failed");
+      const data = await res.json();
+      token = data.token;
+      currentUser = data.username;
+      localStorage.setItem("dharma_token", token);
+    } else {
+      const res = await fetch(`${API}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Sign-in failed");
+      const data = await res.json();
+      token = data.token;
+      currentUser = data.username;
+      localStorage.setItem("dharma_token", token);
+    }
     showLogin(false);
+    await loadProfileData();
     clearChat();
+    renderDrawer();
   } catch (err) {
     errEl.textContent = err.message;
     errEl.hidden = false;
   } finally {
-    btn.disabled = false; btn.textContent = "Begin 🙏";
+    btn.disabled = false;
+    btn.textContent = isSignupMode ? "Create account 🙏" : "Begin 🙏";
   }
 });
 
 logoutBtn.addEventListener("click", () => {
-  token = ""; currentUser = "";
+  token = ""; currentUser = ""; currentDisplayName = "";
   localStorage.removeItem("dharma_token");
   stopSpeaking();
   clearChat();
@@ -92,10 +131,71 @@ async function initAuth() {
   try {
     const me = await apiFetch("/api/auth/me");
     currentUser = me.username;
+    currentDisplayName = me.display_name || me.username;
     showLogin(false);
+    await loadProfileData();
     clearChat();
+    renderDrawer();
   } catch (e) { /* login already shown */ }
 }
+
+// ================= profile =================
+const profileOverlay = document.getElementById("profileOverlay");
+
+async function loadProfileData() {
+  try {
+    const p = await apiFetch("/api/profile");
+    currentDisplayName = p.display_name || currentUser;
+    // Sync language selector if profile has a preference.
+    if (p.preferred_language && p.preferred_language !== currentLanguage) {
+      currentLanguage = p.preferred_language;
+      if (languageSel) languageSel.value = currentLanguage;
+    }
+  } catch (e) { /* quiet */ }
+}
+
+profileBtn.addEventListener("click", openProfile);
+document.getElementById("profileClose").addEventListener("click", () => { profileOverlay.hidden = true; });
+
+async function openProfile() {
+  try {
+    const p = await apiFetch("/api/profile");
+    document.getElementById("profileName").value = p.display_name || "";
+    // Populate language options into profile lang select.
+    const pLang = document.getElementById("profileLang");
+    pLang.innerHTML = languageSel.innerHTML;
+    pLang.value = p.preferred_language || currentLanguage;
+    document.getElementById("profileStyle").value = p.answer_style || "deep";
+    document.getElementById("profileStatus").hidden = true;
+  } catch (e) { /* show stale */ }
+  profileOverlay.hidden = false;
+}
+
+document.getElementById("profileSave").addEventListener("click", async () => {
+  const statusEl = document.getElementById("profileStatus");
+  statusEl.hidden = true;
+  const payload = {
+    display_name: document.getElementById("profileName").value.trim() || undefined,
+    preferred_language: document.getElementById("profileLang").value || undefined,
+    answer_style: document.getElementById("profileStyle").value || undefined,
+  };
+  try {
+    const p = await apiFetch("/api/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    currentDisplayName = p.display_name || currentUser;
+    if (p.preferred_language) { currentLanguage = p.preferred_language; if (languageSel) languageSel.value = currentLanguage; }
+    statusEl.textContent = "Saved 🙏";
+    statusEl.hidden = false;
+    setTimeout(() => { profileOverlay.hidden = true; }, 1000);
+  } catch (e) {
+    statusEl.textContent = e.message;
+    statusEl.style.color = "#ffb38a";
+    statusEl.hidden = false;
+  }
+});
 
 // ================= welcome / modes =================
 function greeting() {
@@ -104,7 +204,7 @@ function greeting() {
 }
 
 function welcomeHTML() {
-  const who = currentUser ? `, ${currentUser}` : "";
+  const who = currentDisplayName ? `, ${currentDisplayName}` : (currentUser ? `, ${currentUser}` : "");
   return `
   <div class="welcome" id="welcome">
     ${faceHTML(currentPersona)}
@@ -123,6 +223,7 @@ function welcomeHTML() {
 function clearChat() {
   history = [];
   chatId = null;
+  setSidebarActive(null);
   stopSpeaking();
   if (currentMode === "converse") {
     chat.innerHTML = welcomeHTML();
@@ -157,23 +258,113 @@ document.getElementById("modebar").addEventListener("click", (e) => {
 });
 document.getElementById("clearBtn").addEventListener("click", () => { clearChat(); if (currentMode === "daily") loadDaily(); });
 
-// ================= conversations drawer (ChatGPT-style) =================
+// ================= persistent sidebar =================
 const drawer = document.getElementById("drawer");
 const drawerBackdrop = document.getElementById("drawerBackdrop");
 const drawerList = document.getElementById("drawerList");
 
+const isDesktop = () => window.innerWidth >= 768;
+
+// Restore collapse state from previous session
+if (localStorage.getItem("dharma_sidebar") === "collapsed") {
+  document.body.classList.add("sidebar-collapsed");
+}
+
+function collapseSidebar() {
+  document.body.classList.add("sidebar-collapsed");
+  localStorage.setItem("dharma_sidebar", "collapsed");
+}
+function expandSidebar() {
+  document.body.classList.remove("sidebar-collapsed");
+  localStorage.setItem("dharma_sidebar", "expanded");
+  renderDrawer();
+}
+
+// histBtn: expand sidebar on desktop, open overlay on mobile
+document.getElementById("histBtn").addEventListener("click", () => {
+  if (!token) { showLogin(true); return; }
+  if (isDesktop()) expandSidebar(); else openDrawer();
+});
+
+// Sidebar toggle button: collapse on desktop, close overlay on mobile
+document.getElementById("sidebarToggle").addEventListener("click", () => {
+  if (isDesktop()) collapseSidebar(); else closeDrawer();
+});
+
+// ---- mobile overlay ----
+let _drawerTrigger = null;
 function openDrawer() {
   if (!token) { showLogin(true); return; }
+  _drawerTrigger = document.activeElement;
   drawer.classList.add("open");
   drawerBackdrop.hidden = false;
   renderDrawer();
+  const first = drawer.querySelector("button:not([disabled])");
+  if (first) first.focus();
 }
 function closeDrawer() {
   drawer.classList.remove("open");
   drawerBackdrop.hidden = true;
+  if (_drawerTrigger) { _drawerTrigger.focus(); _drawerTrigger = null; }
+}
+drawerBackdrop.addEventListener("click", closeDrawer);
+
+// Escape closes mobile overlay
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !isDesktop() && drawer.classList.contains("open")) closeDrawer();
+});
+
+// Focus trap inside drawer when used as mobile overlay
+drawer.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab" || isDesktop()) return;
+  const focusable = [...drawer.querySelectorAll('button:not([disabled]),[href],input,[tabindex]:not([tabindex="-1"])')];
+  if (focusable.length < 2) return;
+  const first = focusable[0], last = focusable[focusable.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+
+document.getElementById("newChatBtn").addEventListener("click", () => {
+  if (!isDesktop()) closeDrawer();
+  if (currentMode !== "converse") setMode("converse"); else clearChat();
+});
+
+// ---- date helpers ----
+function _parseDate(updated) { return new Date(updated.replace(" ", "T")); }
+
+function formatChatDate(updated) {
+  const d = _parseDate(updated);
+  const now = new Date();
+  if (d.toDateString() === now.toDateString())
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === new Date(now - 864e5).toDateString()) return "Yesterday";
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
+function groupChats(chats) {
+  const now = new Date();
+  const todayStr = now.toDateString();
+  const yestStr = new Date(now - 864e5).toDateString();
+  const weekAgo = new Date(now - 7 * 864e5);
+  const groups = [
+    { label: "Today", items: [] },
+    { label: "Yesterday", items: [] },
+    { label: "Previous 7 days", items: [] },
+    { label: "Older", items: [] },
+  ];
+  for (const c of chats) {
+    const d = _parseDate(c.updated);
+    if (d.toDateString() === todayStr) groups[0].items.push(c);
+    else if (d.toDateString() === yestStr) groups[1].items.push(c);
+    else if (d >= weekAgo) groups[2].items.push(c);
+    else groups[3].items.push(c);
+  }
+  return groups.filter((g) => g.items.length > 0);
+}
+
+// ---- render sidebar list ----
 async function renderDrawer() {
+  if (!token) return;
   drawerList.innerHTML = `<div class="drawer-empty">…</div>`;
   try {
     const chats = await apiFetch("/api/chats");
@@ -182,34 +373,55 @@ async function renderDrawer() {
       drawerList.innerHTML = `<div class="drawer-empty">No conversations yet.<br/>Ask your first question 🙏</div>`;
       return;
     }
-    chats.forEach((c) => {
-      const item = document.createElement("div");
-      item.className = "chat-item" + (c.id === chatId ? " current" : "");
-      item.innerHTML = `${faceHTML(c.persona)}<div class="chat-item-body">
-          <div class="chat-item-title">${escapeHtml(c.title)}</div>
-          <div class="chat-item-meta">${escapeHtml(personaName(c.persona))} · ${escapeHtml(c.updated)}</div>
-        </div><button class="chat-item-del" title="Delete">🗑</button>`;
-      item.querySelector(".chat-item-del").onclick = async (e) => {
-        e.stopPropagation();
-        await apiFetch(`/api/chats/${c.id}`, { method: "DELETE" });
-        if (c.id === chatId) { clearChat(); }
-        item.remove();
-      };
-      item.onclick = () => { closeDrawer(); loadChat(c.id); };
-      drawerList.appendChild(item);
+    groupChats(chats).forEach(({ label, items }) => {
+      const lbl = document.createElement("div");
+      lbl.className = "drawer-group-label";
+      lbl.textContent = label;
+      drawerList.appendChild(lbl);
+      items.forEach(buildChatItem);
     });
   } catch (e) {
     drawerList.innerHTML = `<div class="drawer-empty">${escapeHtml(e.message)}</div>`;
   }
 }
 
-document.getElementById("histBtn").addEventListener("click", openDrawer);
-document.getElementById("drawerClose").addEventListener("click", closeDrawer);
-drawerBackdrop.addEventListener("click", closeDrawer);
-document.getElementById("newChatBtn").addEventListener("click", () => {
-  closeDrawer();
-  if (currentMode !== "converse") { setMode("converse"); } else { clearChat(); }
-});
+function buildChatItem(c) {
+  const item = document.createElement("div");
+  item.className = "chat-item" + (c.id === chatId ? " current" : "");
+  item.dataset.chatId = c.id;
+  item.setAttribute("role", "listitem");
+  item.innerHTML = `${faceHTML(c.persona)}
+    <div class="chat-item-body">
+      <div class="chat-item-title">${escapeHtml(c.title)}</div>
+      ${c.preview ? `<div class="chat-item-preview">${escapeHtml(c.preview)}</div>` : ""}
+      <div class="chat-item-meta">${escapeHtml(personaName(c.persona))} · ${escapeHtml(formatChatDate(c.updated))}</div>
+    </div>
+    <button class="chat-item-del" title="Delete" aria-label="Delete conversation">🗑</button>`;
+  item.querySelector(".chat-item-del").onclick = async (e) => {
+    e.stopPropagation();
+    await apiFetch(`/api/chats/${c.id}`, { method: "DELETE" });
+    if (c.id === chatId) clearChat();
+    item.remove();
+    // Clean up now-empty group labels
+    drawerList.querySelectorAll(".drawer-group-label").forEach((lbl) => {
+      if (!lbl.nextElementSibling || lbl.nextElementSibling.classList.contains("drawer-group-label"))
+        lbl.remove();
+    });
+  };
+  item.onclick = (e) => {
+    if (e.target.closest(".chat-item-del")) return;
+    if (!isDesktop()) closeDrawer();
+    loadChat(c.id);
+  };
+  drawerList.appendChild(item);
+}
+
+// Update the active highlight without re-fetching the list
+function setSidebarActive(id) {
+  drawerList.querySelectorAll(".chat-item").forEach((el) => {
+    el.classList.toggle("current", el.dataset.chatId === id);
+  });
+}
 
 function forceConverseUI() {
   currentMode = "converse";
@@ -224,6 +436,7 @@ async function loadChat(id) {
     forceConverseUI();
     const c = await apiFetch(`/api/chats/${id}`);
     chatId = c.id;
+    setSidebarActive(chatId);
     currentPersona = c.persona || "guide";
     currentLanguage = c.language || currentLanguage;
     languageSel.value = currentLanguage;
@@ -583,6 +796,7 @@ async function send(question) {
   addUser(question);
   const wrap = addTyping();
   const perspectivesMode = currentMode === "perspectives";
+  const wasNewChat = !chatId;
   try {
     if (perspectivesMode) {
       const data = await apiFetch(`/api/perspectives`, {
@@ -764,47 +978,25 @@ if (!_mainMicReady) {
 let speakingBtn = null;
 let activeStage = null;
 
-// Server-side audio playback — uses a plain <audio> element (reliable MP3 support).
-let _currentAudio = null;  // current HTMLAudioElement
+let _currentAudio = null;
 let _currentBlobUrl = null;
-let _ttsFetch = null;      // AbortController for the in-flight /api/tts fetch
+let _ttsFetch = null;
 
-// Play raw MP3 bytes returned by /api/tts.
-// Returns a Promise that resolves when playback ends or rejects on error.
 function _playServerAudio(arrayBuffer) {
-  // Clean up any previous audio element
-  if (_currentAudio) {
-    _currentAudio.pause();
-    _currentAudio.src = "";
-    _currentAudio = null;
-  }
+  if (_currentAudio) { _currentAudio.pause(); _currentAudio.src = ""; _currentAudio = null; }
   if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
-
   const blob = new Blob([arrayBuffer], { type: "audio/mpeg" });
   _currentBlobUrl = URL.createObjectURL(blob);
   _currentAudio = new Audio(_currentBlobUrl);
   _currentAudio.volume = 1.0;
-
   return new Promise((resolve, reject) => {
-    _currentAudio.onended = () => {
-      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
-      _currentAudio = null;
-      resolve();
-    };
-    _currentAudio.onerror = () => {
-      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
-      _currentAudio = null;
-      reject(new Error("audio playback error"));
-    };
-    _currentAudio.play().catch((err) => {
-      if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; }
-      _currentAudio = null;
-      reject(err);
-    });
+    _currentAudio.onended = () => { if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; } _currentAudio = null; resolve(); };
+    _currentAudio.onerror = () => { if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; } _currentAudio = null; reject(new Error("audio playback error")); };
+    _currentAudio.play().catch((err) => { if (_currentBlobUrl) { URL.revokeObjectURL(_currentBlobUrl); _currentBlobUrl = null; } _currentAudio = null; reject(err); });
   });
 }
 
-// Voices load ASYNC in browsers — getVoices() is often empty on first call.
+
 let _voicesPromise = null;
 function loadVoices() {
   if (_voicesPromise) return _voicesPromise;
@@ -817,7 +1009,6 @@ function loadVoices() {
   return _voicesPromise;
 }
 
-// Prefer deep male Indian voices, then natural ones; match by language family.
 function pickVoice(voices, lang) {
   const two = lang.slice(0, 2);
   const pref = /(ravi|hemant|prabhat|madhur|swara|valluvar|male)/i;
@@ -846,7 +1037,7 @@ function speakRaw(text, stageEl, onend, onnovoice) {
     const v = pickVoice(voices, lang);
     if (v) u.voice = v;
     u.rate = 0.95;
-    u.pitch = 0.82; // deeper, calmer — no baby voice
+    u.pitch = 0.82;
     activeStage = stageEl;
     stageEl.classList.add("talking");
     let spoke = false;
@@ -854,7 +1045,6 @@ function speakRaw(text, stageEl, onend, onnovoice) {
     const done = () => {
       stageEl.classList.remove("talking");
       activeStage = null;
-      // Device has no voice for this language: tell the user instead of silent failure.
       if (!spoke && !v && lang.slice(0, 2) !== "en" && onnovoice) {
         onnovoice(LANG_LABEL[lang.slice(0, 2)] || lang);
       }
@@ -863,7 +1053,6 @@ function speakRaw(text, stageEl, onend, onnovoice) {
     u.onend = done;
     u.onerror = done;
     window.speechSynthesis.speak(u);
-    // Safety: if nothing started within 3s and no voice exists, surface the issue.
     setTimeout(() => { if (!spoke && !v && lang.slice(0, 2) !== "en") { window.speechSynthesis.cancel(); } }, 3000);
   });
 }
@@ -968,7 +1157,7 @@ async function convoAsk(question) {
   if (convoBusy) return;
   convoBusy = true;
   convoStatus.textContent = "listening…";
-  convoText.textContent = "\u201c" + question + "\u201d";
+  convoText.textContent = "“" + question + "”";
   addUser(question);
   const wrap = addTyping();
   try {
@@ -1063,7 +1252,7 @@ async function convoAsk(question) {
   }
 }
 
-// Conversation overlay mic — Whisper with browser SR fallback
+// Whisper mic with browser SR fallback
 const _convoMicReady = _whisperMic(
   convoMic,
   (text) => { stopSpeaking(); convoOverlay.classList.remove("talking"); convoAsk(text); },
@@ -1085,14 +1274,13 @@ if (!_convoMicReady) {
     crec.onstart = () => { clistening = true; convoMic.classList.add("listening"); convoStatus.textContent = "listening…"; };
     crec.onend = () => { clistening = false; convoMic.classList.remove("listening"); };
     crec.onresult = (ev) => convoAsk(ev.results[0][0].transcript);
-    crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn't catch that — tap the mic again"; };
+    crec.onerror = () => { clistening = false; convoMic.classList.remove("listening"); convoStatus.textContent = "didn’t catch that — tap the mic again"; };
   } else {
     convoMic.style.opacity = 0.4;
     convoStatus.textContent = "voice needs mic permission";
   }
 }
 
-// open conversation mode by tapping the big welcome avatar or the talk chip
 chat.addEventListener("click", (e) => {
   if (e.target.closest(".talk-chip") || e.target.closest("#welcome .avatar")) openConvo();
 });
